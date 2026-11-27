@@ -334,6 +334,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func drawFramedWindow(_ window: NSWindow, in winRect: NSRect, isDark: Bool, shadowRadius: CGFloat) {
         guard let contentView = window.contentView else { return }
         let titleHeight: CGFloat = 28
+        window.makeKeyAndOrderFront(nil)
         window.displayIfNeeded()
         var contentRep: NSBitmapImageRep?
         window.effectiveAppearance.performAsCurrentDrawingAppearance {

@@ -40,7 +40,7 @@ enum Breadcrumbs {
         #if DEBUG
         if DemoRedactor.enabled, let demoRoot = DemoRedactor.demoRoot,
            url.isSameItem(as: demoRoot) || url.isDescendant(of: demoRoot) {
-            result.append(BreadcrumbSegment(title: "Users", location: .folder(volumeURL)))
+            result.append(BreadcrumbSegment(title: FileManager.default.displayName(atPath: "/Users"), location: .folder(volumeURL)))
             result.append(BreadcrumbSegment(title: "Alex", location: .home))
             result.append(BreadcrumbSegment(title: demoRoot.lastPathComponent, location: .folder(demoRoot)))
             for folder in url.folderChain(below: demoRoot) {

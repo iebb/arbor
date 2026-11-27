@@ -72,7 +72,7 @@ enum DemoRedactor {
     static func displayName(of url: URL) -> String? {
         guard enabled else { return nil }
         if url.isSameItem(as: FileManager.default.realHomeDirectory) { return "Alex" }
-        if url.pathKey.hasPrefix("/Volumes/"), url.isVolumeRoot { return "External SSD" }
+        if url.pathKey.hasPrefix("/Volumes/"), url.isVolumeRoot { return String(localized: "External SSD") }
         return nil
     }
 

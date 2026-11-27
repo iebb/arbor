@@ -324,9 +324,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         list.add(header: String(localized: "Navigation pane"), symbol: "sidebar.left", level: 0)
         list.add(check(String(localized: "Expand to open folder"), .expandToOpenFolder), level: 1)
         list.add(check(String(localized: "Show This Mac"), .showThisMac), level: 1)
-        list.heightAnchor.constraint(equalToConstant: 450).isActive = true
+        list.heightAnchor.constraint(equalToConstant: 420).isActive = true
 
         let advancedLabel = NSTextField.label(String(localized: "Advanced settings:"))
+        advancedLabel.setContentCompressionResistancePriority(.required, for: .vertical)
         return page([folderViews, advancedLabel, list], restore: #selector(restoreView))
     }
 

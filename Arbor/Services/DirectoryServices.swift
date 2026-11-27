@@ -387,7 +387,7 @@ enum VolumeService {
             let isNetwork = !(values.volumeIsLocal ?? true)
             var displayName = values.volumeLocalizedName ?? url.lastPathComponent
             #if DEBUG
-            if DemoRedactor.enabled, !isRoot, !isNetwork { displayName = "External SSD" }
+            if DemoRedactor.enabled, !isRoot, !isNetwork { displayName = String(localized: "External SSD") }
             #endif
             return VolumeInfo(
                 url: url.normalizedFolder,
