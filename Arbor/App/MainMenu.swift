@@ -39,6 +39,14 @@ enum MainMenu {
     private static func appMenu() -> NSMenu {
         let menu = NSMenu()
         menu.addItem(item(String(localized: "About Arbor"), #selector(NSApplication.orderFrontStandardAboutPanel(_:))))
+        if Updater.shared.isAvailable {
+            let check = item(String(localized: "Check for Updates…"), #selector(Updater.checkForUpdates(_:)))
+            check.target = Updater.shared
+            menu.addItem(check)
+        }
+        if Edition.isAppStore {
+            menu.addItem(item(String(localized: "Grant Disk Access…"), #selector(AppDelegate.grantDiskAccess(_:))))
+        }
         menu.addItem(.separator())
         menu.addItem(item(String(localized: "Settings…"), #selector(AppDelegate.showSettings(_:)), ","))
         menu.addItem(.separator())
@@ -144,7 +152,7 @@ enum MainMenu {
         menu.addItem(.separator())
         menu.addItem(item(String(localized: "This Mac"), #selector(B.goToThisMac(_:)), "c", [.command, .shift]))
         let fm = FileManager.default
-        menu.addItem(item(String(localized: "Home"), #selector(B.goToFolder(_:)), "h", [.command, .shift], object: fm.homeDirectoryForCurrentUser.normalizedFolder))
+        menu.addItem(item(String(localized: "Home"), #selector(B.goToFolder(_:)), "h", [.command, .shift], object: fm.realHomeDirectory.normalizedFolder))
         let places: [(String, FileManager.SearchPathDirectory, FileManager.SearchPathDomainMask, String, NSEvent.ModifierFlags)] = [
             (String(localized: "Desktop"), .desktopDirectory, .userDomainMask, "d", [.command, .shift]),
             (String(localized: "Documents"), .documentDirectory, .userDomainMask, "o", [.command, .shift]),
@@ -153,11 +161,11 @@ enum MainMenu {
             (String(localized: "Utilities"), .applicationDirectory, .localDomainMask, "u", [.command, .shift]),
         ]
         for (title, directory, domain, key, modifiers) in places {
-            guard var url = fm.urls(for: directory, in: domain).first else { continue }
+            guard var url = (domain == .userDomainMask ? fm.userFolderURL(directory) : fm.urls(for: directory, in: domain).first) else { continue }
             if key == "u" { url = url.appendingPathComponent("Utilities", isDirectory: true) }
             menu.addItem(item(title, #selector(B.goToFolder(_:)), key, modifiers, object: url.normalizedFolder))
         }
-        let iCloud = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
+        let iCloud = fm.realHomeDirectory.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
         if fm.fileExists(atPath: iCloud.path) {
             menu.addItem(item(String(localized: "iCloud Drive"), #selector(B.goToFolder(_:)), "i", [.command, .shift], object: iCloud.normalizedFolder))
         }

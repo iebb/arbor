@@ -136,6 +136,28 @@ Arbor is not sandboxed (a file manager needs to reach the whole disk). macOS ask
 Desktop, Documents, Downloads and removable drives the first time; for protected areas such as
 `~/Library/Mail`, grant **Full Disk Access** in System Settings › Privacy & Security.
 
+## Editions and releases
+
+Arbor builds two apps from the same code:
+
+| | Download (`Arbor` target) | Mac App Store (`Arbor App Store` target) |
+| --- | --- | --- |
+| Sandbox | No | Yes — asks once for your startup disk (Arbor › Grant Disk Access…) |
+| Updates | Sparkle, from GitHub releases | App Store |
+| Use Arbor to open folders | Yes | No (sandboxed apps can't change the default) |
+| Everything else | Yes | Yes; ZIP tools, Eject and network mounting may be limited by the sandbox |
+
+**Signed releases.** `.github/workflows/release.yml` signs, notarizes and publishes a Sparkle feed
+only when these are set on the repository; without them, releases stay ad-hoc signed:
+
+- secrets `DEVELOPER_ID_P12` (base64 of a Developer ID Application .p12), `DEVELOPER_ID_P12_PASSWORD`
+- variable `SIGN_IDENTITY`, e.g. `Developer ID Application: Kitta Ltd (7P8CLHDH5G)`
+- secrets `NOTARY_KEY` (App Store Connect API .p8 contents), `NOTARY_KEY_ID`, `NOTARY_ISSUER`
+- secret `SPARKLE_PRIVATE_KEY` and variable `SPARKLE_PUBLIC_KEY` (from Sparkle's `generate_keys`)
+
+`scripts/sign-and-notarize.sh` does the same locally. `scripts/appstore-upload.sh` archives and
+uploads the App Store build. `packaging/homebrew/arbor.rb` is the cask for a Homebrew tap.
+
 ## Architecture
 
 ```

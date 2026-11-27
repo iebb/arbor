@@ -55,6 +55,17 @@ jobs:
             | tee build/release.log
           ditto -c -k --sequesterRsrc --keepParent build/DerivedData/Build/Products/Release/Arbor.app build/Arbor.zip
 
+      - name: Build App Store edition (sandboxed, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Arbor.xcodeproj \
+            -scheme "Arbor App Store" \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData \
+            | tee build/appstore.log
+
       - name: Upload app
         uses: actions/upload-artifact@v4
         with:

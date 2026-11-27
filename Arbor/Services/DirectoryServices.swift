@@ -45,7 +45,7 @@ enum ProtectedFiles {
     /// Folders skipped when "Include system directories" is off.
     static var systemDirectories: [String] {
         ["/System", "/Library", "/private", "/usr", "/bin", "/sbin", "/cores", "/dev",
-         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library").pathKey]
+         FileManager.default.realHomeDirectory.appendingPathComponent("Library").pathKey]
     }
 }
 

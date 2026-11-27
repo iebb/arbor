@@ -278,7 +278,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let defaultButtons = NSStackView(views: [makeDefault, restoreFinder])
         let viewer = group(String(localized: "Default folder viewer"), symbol: "folder", [defaultButtons, defaultStatus])
 
-        return page([startRow, launch, browse, click, privacy, viewer], restore: #selector(restoreGeneral))
+        // The sandboxed store build can't change which app opens folders.
+        let groups = Edition.canSetDefaultFolderViewer ? [startRow, launch, browse, click, privacy, viewer] : [startRow, launch, browse, click, privacy]
+        return page(groups, restore: #selector(restoreGeneral))
     }
 
     // MARK: View

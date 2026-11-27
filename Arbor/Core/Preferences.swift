@@ -30,13 +30,13 @@ enum StartLocation: String, CaseIterable {
     }
 
     static var iCloudURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        FileManager.default.realHomeDirectory
             .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
     }
 
     var location: Location {
         func user(_ dir: FileManager.SearchPathDirectory) -> Location {
-            guard let url = FileManager.default.urls(for: dir, in: .userDomainMask).first else { return .home }
+            guard let url = FileManager.default.userFolderURL(dir) else { return .home }
             return .folder(url.normalizedFolder)
         }
         switch self {
@@ -208,7 +208,7 @@ final class Preferences {
 
     static var defaultPins: [URL] {
         let dirs: [FileManager.SearchPathDirectory] = [.desktopDirectory, .downloadsDirectory, .documentDirectory, .picturesDirectory, .musicDirectory, .moviesDirectory]
-        return dirs.compactMap { FileManager.default.urls(for: $0, in: .userDomainMask).first?.normalizedFolder }
+        return dirs.compactMap { FileManager.default.userFolderURL($0)?.normalizedFolder }
     }
 
     func isPinned(_ url: URL) -> Bool { pinnedFolders.contains { $0.isSameItem(as: url) } }
@@ -307,7 +307,7 @@ final class RecentItems {
 
     /// Folders visited at least three times, most used first — excluding Home and pinned folders.
     func frequentFolders(limit: Int = 6) -> [URL] {
-        let home = FileManager.default.homeDirectoryForCurrentUser.pathKey
+        let home = FileManager.default.realHomeDirectory.pathKey
         return folderCounts
             .filter { $0.value >= 3 && $0.key != home }
             .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }

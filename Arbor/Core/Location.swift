@@ -57,7 +57,7 @@ enum Location: Hashable {
         FileManager.default.displayName(atPath: url.path)
     }
 
-    static var home: Location { .folder(FileManager.default.homeDirectoryForCurrentUser.normalizedFolder) }
+    static var home: Location { .folder(FileManager.default.realHomeDirectory.normalizedFolder) }
 }
 
 extension URL {
@@ -96,5 +96,22 @@ extension URL {
             chain.append(current)
         }
         return chain
+    }
+}
+
+extension FileManager {
+    /// The user's real home folder. In the sandboxed App Store build, `realHomeDirectory`
+    /// points into the app's container instead, which isn't what a file manager should show.
+    var realHomeDirectory: URL {
+        if let entry = getpwuid(getuid()), let dir = entry.pointee.pw_dir {
+            return URL(fileURLWithPath: String(cString: dir), isDirectory: true)
+        }
+        return homeDirectoryForCurrentUser
+    }
+
+    /// ~/Desktop, ~/Documents… in the real home folder (not the sandbox container).
+    func userFolderURL(_ directory: SearchPathDirectory) -> URL? {
+        guard let containerURL = urls(for: directory, in: .userDomainMask).first else { return nil }
+        return realHomeDirectory.appendingPathComponent(containerURL.lastPathComponent, isDirectory: true)
     }
 }

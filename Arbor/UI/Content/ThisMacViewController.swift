@@ -54,8 +54,8 @@ final class ThisMacViewController: NSViewController {
 
         let fm = FileManager.default
         let folderDirs: [FileManager.SearchPathDirectory] = [.desktopDirectory, .documentDirectory, .downloadsDirectory, .musicDirectory, .picturesDirectory, .moviesDirectory]
-        var folders = folderDirs.compactMap { fm.urls(for: $0, in: .userDomainMask).first?.normalizedFolder }
-        folders.insert(fm.homeDirectoryForCurrentUser.normalizedFolder, at: 0)
+        var folders = folderDirs.compactMap { fm.userFolderURL($0)?.normalizedFolder }
+        folders.insert(fm.realHomeDirectory.normalizedFolder, at: 0)
         if let apps = fm.urls(for: .applicationDirectory, in: .localDomainMask).first { folders.append(apps.normalizedFolder) }
         let folderTiles = folders.filter { fm.fileExists(atPath: $0.path) }.map { url in
             TileView(url: url, title: Location.displayName(of: url), subtitle: nil, volume: nil)

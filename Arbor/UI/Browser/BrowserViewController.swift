@@ -412,7 +412,11 @@ final class BrowserViewController: NSViewController {
         applyItems()
         let nsError = error as NSError
         if nsError.domain == NSCocoaErrorDomain, nsError.code == NSFileReadNoPermissionError {
-            contentHost.setMessage(String(localized: "You don't currently have permission to access this folder.\n\nTo open it, give Arbor access in System Settings › Privacy & Security › Files and Folders (or Full Disk Access)."))
+            if Edition.isAppStore {
+                contentHost.setMessage(String(localized: "Arbor doesn't have access to this folder yet.\n\nChoose Arbor › Grant Disk Access… and select your startup disk."))
+            } else {
+                contentHost.setMessage(String(localized: "You don't currently have permission to access this folder.\n\nTo open it, give Arbor access in System Settings › Privacy & Security › Files and Folders (or Full Disk Access)."))
+            }
         } else {
             contentHost.setMessage(error.localizedDescription)
         }

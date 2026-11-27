@@ -11,15 +11,39 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
     MACOSX_DEPLOYMENT_TARGET: "14.0"
-targets:
-  Arbor:
+packages:
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.6.0"
+
+# Both apps build from the same sources. "Arbor" is the download (notarized, Sparkle updates,
+# every feature); "Arbor App Store" is the sandboxed Mac App Store build (compiled with APPSTORE).
+targetTemplates:
+  ArborApp:
     type: application
     platform: macOS
     sources:
       - path: Arbor
+        excludes:
+          - "Resources/*.entitlements"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.iebb.arbor
+        PRODUCT_NAME: Arbor
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        DEVELOPMENT_TEAM: ""
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        COMBINE_HIDPI_IMAGES: YES
+
+targets:
+  Arbor:
+    templates: [ArborApp]
+    dependencies:
+      - package: Sparkle
     info:
       path: Arbor/Resources/Info.plist
-      properties:
+      properties: &infoProperties
         CFBundleName: Arbor
         CFBundleDisplayName: Arbor
         CFBundleShortVersionString: $(MARKETING_VERSION)
@@ -28,6 +52,7 @@ targets:
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSPrincipalClass: NSApplication
         NSHumanReadableCopyright: "Copyright © 2026 ieb. MIT License."
+        ITSAppUsesNonExemptEncryption: false
         NSDesktopFolderUsageDescription: Arbor shows the files in your Desktop folder.
         NSDocumentsFolderUsageDescription: Arbor shows the files in your Documents folder.
         NSDownloadsFolderUsageDescription: Arbor shows the files in your Downloads folder.
@@ -40,17 +65,38 @@ targets:
             LSItemContentTypes:
               - public.folder
               - public.volume
+        # Sparkle: updates are only checked when a public key is supplied at build time.
+        SUFeedURL: https://github.com/iebb/arbor/releases/latest/download/appcast.xml
+        SUPublicEDKey: $(SPARKLE_PUBLIC_KEY)
+        SUEnableAutomaticChecks: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: io.github.iebb.arbor
-        PRODUCT_NAME: Arbor
-        CODE_SIGN_IDENTITY: "-"
-        CODE_SIGN_STYLE: Manual
-        DEVELOPMENT_TEAM: ""
-        ENABLE_HARDENED_RUNTIME: NO
+        SPARKLE_PUBLIC_KEY: ""
         ENABLE_APP_SANDBOX: NO
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
-        COMBINE_HIDPI_IMAGES: YES
+        ENABLE_HARDENED_RUNTIME: NO
+      configs:
+        Release:
+          # Notarization requires the hardened runtime.
+          ENABLE_HARDENED_RUNTIME: YES
+
+  Arbor App Store:
+    templates: [ArborApp]
+    info:
+      path: Arbor/Resources/Info-AppStore.plist
+      properties:
+        <<: *infoProperties
+        SUFeedURL: ""
+        SUPublicEDKey: ""
+        SUEnableAutomaticChecks: false
+    settings:
+      base:
+        CODE_SIGN_ENTITLEMENTS: Arbor/Resources/ArborAppStore.entitlements
+        ENABLE_APP_SANDBOX: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) APPSTORE
+        # Keep the store build's Arbor.app apart from the download's in DerivedData.
+        CONFIGURATION_BUILD_DIR: $(BUILD_DIR)/$(CONFIGURATION)-AppStore
+
   ArborTests:
     type: bundle.unit-test
     platform: macOS
@@ -64,6 +110,7 @@ targets:
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
         GENERATE_INFOPLIST_FILE: YES
+
 schemes:
   Arbor:
     build:
@@ -76,3 +123,11 @@ schemes:
       config: Debug
       targets:
         - ArborTests
+  Arbor App Store:
+    build:
+      targets:
+        Arbor App Store: all
+    run:
+      config: Debug
+    archive:
+      config: Release

@@ -32,7 +32,7 @@ extension BrowserViewController: NSMenuItemValidation {
     }
 
     private func isRemovable(_ url: URL) -> Bool {
-        !url.isVolumeRoot && url.pathKey != FileManager.default.homeDirectoryForCurrentUser.pathKey
+        !url.isVolumeRoot && url.pathKey != FileManager.default.realHomeDirectory.pathKey
     }
 
     // MARK: Validation

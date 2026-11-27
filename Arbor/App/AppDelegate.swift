@@ -21,6 +21,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Lifecycle
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        Updater.shared.start()
+        SandboxAccess.restore()
         NSApp.mainMenu = MainMenu.build()
         NSWindow.allowsAutomaticWindowTabbing = true
     }
@@ -47,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         didFinishLaunching = true
+        if SandboxAccess.needsAccess { SandboxAccess.requestAccess() }
         if pendingOpenURLs.isEmpty {
             if let start = startLocationFromArguments() {
                 openWindow(start)
@@ -194,6 +197,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// ⌘T: a new tab at the start location.
     @objc func newTab(_ sender: Any?) {
         openTab(Preferences.shared.startLocation.location, from: NSApp.keyWindow)
+    }
+
+    /// App Store build: Arbor › Grant Disk Access…
+    @objc func grantDiskAccess(_ sender: Any?) {
+        SandboxAccess.requestAccess()
     }
 
     @objc func showSettings(_ sender: Any?) {

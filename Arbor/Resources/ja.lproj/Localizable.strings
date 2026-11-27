@@ -317,3 +317,8 @@
 "“%@” can't be moved into itself." = "“%@” をそれ自身の中に移動することはできません。";
 "“%@” can't be moved to the Trash." = "“%@” をゴミ箱に移動できません。";
 "⌥⌘Space" = "⌥⌘スペース";
+"Grant Access" = "アクセスを許可";
+"Arbor is sandboxed in the App Store version. Choose your startup disk (Macintosh HD) to let Arbor show all your files, or choose a single folder." = "App Store 版の Arbor はサンドボックス内で動作します。起動ディスク (Macintosh HD) を選ぶとすべてのファイルを表示できます。特定のフォルダーだけを選ぶこともできます。";
+"Grant Disk Access…" = "ディスクへのアクセスを許可…";
+"Check for Updates…" = "アップデートを確認…";
+"Arbor doesn't have access to this folder yet.\n\nChoose Arbor › Grant Disk Access… and select your startup disk." = "Arbor はまだこのフォルダーにアクセスできません。\n\nArbor › ディスクへのアクセスを許可… を選択し、起動ディスクを選んでください。";

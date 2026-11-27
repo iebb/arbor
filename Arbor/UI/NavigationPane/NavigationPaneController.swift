@@ -147,7 +147,7 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
     private func buildRoots() {
         let fm = FileManager.default
         var nodes: [TreeNode] = []
-        let home = fm.homeDirectoryForCurrentUser.normalizedFolder
+        let home = fm.realHomeDirectory.normalizedFolder
         nodes.append(TreeNode(kind: .home, url: home, title: String(localized: "Home")))
         let iCloud = home.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
         if fm.fileExists(atPath: iCloud.path) {
