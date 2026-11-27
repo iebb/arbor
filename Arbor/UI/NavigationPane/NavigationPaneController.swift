@@ -2,6 +2,7 @@ import AppKit
 
 protocol NavigationPaneDelegate: AnyObject {
     func navigationPane(_ pane: NavigationPaneController, didSelect location: Location)
+    func navigationPane(_ pane: NavigationPaneController, openInNewTab location: Location)
     func navigationPane(_ pane: NavigationPaneController, menuFor node: TreeNode) -> NSMenu?
     func navigationPane(_ pane: NavigationPaneController, dropOperationFor info: NSDraggingInfo, into folder: URL) -> NSDragOperation
     func navigationPane(_ pane: NavigationPaneController, acceptDrop info: NSDraggingInfo, into folder: URL) -> Bool
@@ -95,6 +96,10 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
         outlineView.menuProvider = { [weak self] node in
             guard let self, let node else { return nil }
             return self.delegate?.navigationPane(self, menuFor: node)
+        }
+        outlineView.onMiddleClick = { [weak self] node in
+            guard let self, let location = node?.location else { return }
+            self.delegate?.navigationPane(self, openInNewTab: location)
         }
 
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 230, height: 500))
@@ -394,11 +399,21 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
 
 final class NavigationOutlineView: NSOutlineView {
     var menuProvider: ((TreeNode?) -> NSMenu?)?
+    var onMiddleClick: ((TreeNode?) -> Void)?
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
         let row = row(at: point)
         return menuProvider?(row >= 0 ? item(atRow: row) as? TreeNode : nil)
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        if event.buttonNumber == 2 {
+            let row = row(at: convert(event.locationInWindow, from: nil))
+            onMiddleClick?(row >= 0 ? item(atRow: row) as? TreeNode : nil)
+            return
+        }
+        super.otherMouseUp(with: event)
     }
 }
 

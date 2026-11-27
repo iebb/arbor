@@ -116,4 +116,4 @@ store build as the unit-test host and CI failed with "Could not launch ArborTest
    publish it to a tap repo (e.g. `iebb/homebrew-tap`), which doesn't exist yet.
 3. **Never tested by hand:** drag and drop (within Arbor and with Finder), right-click menus,
    Properties window, mounting a real SMB/AFP share, Sparkle updating from one signed release to the next.
-4. Roadmap ideas (README): Spotlight-backed search, collapsible groups, more languages.
+4. Roadmap ideas (README): more languages, dual-pane mode.

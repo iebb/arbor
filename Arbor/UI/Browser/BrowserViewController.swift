@@ -24,13 +24,18 @@ final class BrowserViewController: NSViewController {
     var quickLookURLs: [URL] = []
     var sharePicker: NSSharingServicePicker?
 
+    enum SidePaneMode { case none, preview, details }
+
     // MARK: Views
     let addressBar = AddressBarView()
     let commandBar = CommandBarView()
     let statusBar = StatusBarView()
     let navigationPane = NavigationPaneController()
     let contentHost = ContentHostViewController()
+    let sidePaneHost = ContentHostViewController()
     let previewPane = PreviewPaneController()
+    let detailsPane = DetailsPaneController()
+    private(set) var sidePaneMode: SidePaneMode = .none
     private let splitController = NSSplitViewController()
     private(set) var navigationSplitItem: NSSplitViewItem!
     private(set) var previewSplitItem: NSSplitViewItem!
@@ -93,11 +98,23 @@ final class BrowserViewController: NSViewController {
         let contentItem = NSSplitViewItem(viewController: contentHost)
         contentItem.minimumThickness = 320
 
-        previewSplitItem = NSSplitViewItem(viewController: previewPane)
+        previewSplitItem = NSSplitViewItem(viewController: sidePaneHost)
         previewSplitItem.minimumThickness = 220
         previewSplitItem.canCollapse = true
         previewSplitItem.holdingPriority = NSLayoutConstraint.Priority(259)
-        previewSplitItem.isCollapsed = !Preferences.shared.showPreviewPane
+        if Preferences.shared.showPreviewPane {
+            sidePaneMode = .preview
+            sidePaneHost.show(previewPane)
+            previewSplitItem.isCollapsed = false
+        } else if Preferences.shared.showDetailsPane {
+            sidePaneMode = .details
+            sidePaneHost.show(detailsPane)
+            previewSplitItem.isCollapsed = false
+        } else {
+            sidePaneMode = .none
+            previewSplitItem.isCollapsed = true
+        }
+        detailsPane.onOpenProperties = { [weak self] in self?.showProperties(nil) }
 
         splitController.splitViewItems = [navigationSplitItem, contentItem, previewSplitItem]
 
@@ -450,7 +467,7 @@ final class BrowserViewController: NSViewController {
 
         switch location {
         case .search:
-            contentHost.setMessage(items.isEmpty ? (isBusy ? "Searching…" : "No items match your search.") : nil)
+            contentHost.setMessage(items.isEmpty ? (isBusy ? String(localized: "Searching…") : String(localized: "No items match your search.")) : nil)
         case .folder:
             if items.isEmpty {
                 if contentHost.message == nil { contentHost.setMessage(String(localized: "This folder is empty.")) }
@@ -518,10 +535,22 @@ final class BrowserViewController: NSViewController {
         let count = location.isThisMac ? thisMacController.itemCount : items.count
         statusBar.update(itemCount: count, selectedCount: selection.count, selectedSize: size)
         updateCommandStates()
-        if !previewSplitItem.isCollapsed { previewPane.show(selection) }
+        updateSidePane(selection: selection, totalCount: count)
         if QLPreviewPanel.sharedPreviewPanelExists(), let panel = QLPreviewPanel.shared(), panel.isVisible, panel.dataSource === self {
             quickLookURLs = selection.map(\.url)
             panel.reloadData()
+        }
+    }
+
+    private func updateSidePane(selection: [FileItem], totalCount: Int) {
+        guard !previewSplitItem.isCollapsed else { return }
+        switch sidePaneMode {
+        case .preview:
+            previewPane.show(selection)
+        case .details:
+            detailsPane.show(selection, location: location, totalCount: totalCount)
+        case .none:
+            break
         }
     }
 
@@ -534,7 +563,8 @@ final class BrowserViewController: NSViewController {
         state.canRename = canPerform(#selector(renameSelection(_:)))
         state.canShare = !selectedContentItems.isEmpty
         state.canDelete = canPerform(#selector(moveToTrash(_:)))
-        state.previewVisible = !previewSplitItem.isCollapsed
+        state.previewVisible = !previewSplitItem.isCollapsed && sidePaneMode == .preview
+        state.detailsVisible = !previewSplitItem.isCollapsed && sidePaneMode == .details
         commandBar.update(state)
     }
 
@@ -565,7 +595,8 @@ final class BrowserViewController: NSViewController {
         IconCache.invalidate()
         applyStatusBarVisibility()
         updateChrome()
-        if !previewSplitItem.isCollapsed { previewPane.show(selectedContentItems) }
+        let count = location.isThisMac ? thisMacController.itemCount : items.count
+        updateSidePane(selection: selectedContentItems, totalCount: count)
         reload()
     }
 
@@ -576,10 +607,27 @@ final class BrowserViewController: NSViewController {
         Preferences.shared.showNavigationPane = visible
     }
 
-    func setPreviewPaneVisible(_ visible: Bool) {
-        previewSplitItem.animator().isCollapsed = !visible
-        Preferences.shared.showPreviewPane = visible
-        if visible { previewPane.show(selectedContentItems) }
+    func setSidePane(_ mode: SidePaneMode) {
+        sidePaneMode = mode
+        switch mode {
+        case .none:
+            previewSplitItem.animator().isCollapsed = true
+            Preferences.shared.showPreviewPane = false
+            Preferences.shared.showDetailsPane = false
+        case .preview:
+            sidePaneHost.show(previewPane)
+            previewSplitItem.animator().isCollapsed = false
+            Preferences.shared.showPreviewPane = true
+            Preferences.shared.showDetailsPane = false
+            previewPane.show(selectedContentItems)
+        case .details:
+            sidePaneHost.show(detailsPane)
+            previewSplitItem.animator().isCollapsed = false
+            Preferences.shared.showPreviewPane = false
+            Preferences.shared.showDetailsPane = true
+            let count = location.isThisMac ? thisMacController.itemCount : items.count
+            detailsPane.show(selectedContentItems, location: location, totalCount: count)
+        }
         updateCommandStates()
     }
 }

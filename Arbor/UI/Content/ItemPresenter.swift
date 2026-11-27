@@ -162,6 +162,7 @@ protocol ItemPresenter: NSViewController {
 protocol ItemPresenterDelegate: AnyObject {
     func presenterSelectionDidChange(_ presenter: ItemPresenter)
     func presenter(_ presenter: ItemPresenter, open items: [FileItem])
+    func presenter(_ presenter: ItemPresenter, openInNewTab items: [FileItem])
     func presenter(_ presenter: ItemPresenter, menuFor items: [FileItem]) -> NSMenu?
     /// Returns true when the rename succeeded.
     func presenter(_ presenter: ItemPresenter, rename item: FileItem, to newName: String) -> Bool

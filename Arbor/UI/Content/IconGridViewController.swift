@@ -5,9 +5,14 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
     weak var delegate: ItemPresenterDelegate?
     let collectionView = ExplorerCollectionView()
     private let layout = NSCollectionViewFlowLayout()
-    /// All items in display order; groups are consecutive runs of it.
+    /// All items in group order (including those in collapsed groups).
+    private var allItems: [FileItem] = []
+    /// Currently visible items in display order; sections are consecutive runs of it.
     private var items: [FileItem] = []
+    private var groups: [ItemGroup] = []
+    private var collapsedGroups: Set<String> = []
     private var sectionTitles: [String] = [""]
+    private var sectionTotalCounts: [Int] = [0]
     private var sectionStarts: [Int] = [0]
     private var lastContentWidth: CGFloat = 0
 
@@ -76,6 +81,11 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
             guard let self, self.items.indices.contains(self.flat(indexPath)) else { return }
             let selection = self.selectedItems
             self.delegate?.presenter(self, open: selection.isEmpty ? [self.items[self.flat(indexPath)]] : selection)
+        }
+        collectionView.onMiddleClick = { [weak self] indexPath in
+            guard let self, self.items.indices.contains(self.flat(indexPath)) else { return }
+            let item = self.items[self.flat(indexPath)]
+            if item.isFolder { self.delegate?.presenter(self, openInNewTab: [item]) }
         }
         collectionView.menuProvider = { [weak self] in
             guard let self else { return nil }
@@ -156,17 +166,12 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         }
         deferredShow = nil
         let previouslySelected = Set(selectedItems.map(\.url.pathKey))
-        let groups = FileGrouping.groups(newItems, by: newContext.groupBy)
-        // Sections are consecutive runs of `items`, so store the items in group order.
-        items = groups.flatMap(\.items)
-        sectionTitles = groups.isEmpty ? [""] : groups.map(\.title)
-        var starts: [Int] = []
-        var offset = 0
-        for group in groups {
-            starts.append(offset)
-            offset += group.items.count
+        if scrollToTop || newContext.groupBy != context.groupBy {
+            collapsedGroups = []
         }
-        sectionStarts = starts.isEmpty ? [0] : starts
+        groups = FileGrouping.groups(newItems, by: newContext.groupBy)
+        allItems = groups.flatMap(\.items)
+        rebuildVisibleSections()
         let groupingChanged = context.groupBy != newContext.groupBy
         let compactChanged = context.display.compact != newContext.display.compact
         context = newContext
@@ -175,6 +180,97 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         let paths = items.indices.filter { previouslySelected.contains(items[$0].url.pathKey) }.map { path($0) }
         collectionView.selectionIndexPaths = Set(paths)
         if scrollToTop { collectionView.scroll(.zero) }
+    }
+
+    // MARK: Collapsible groups
+
+    private func rebuildVisibleSections() {
+        var visible: [FileItem] = []
+        var titles: [String] = []
+        var counts: [Int] = []
+        var starts: [Int] = []
+        for group in groups {
+            titles.append(group.title)
+            counts.append(group.items.count)
+            starts.append(visible.count)
+            if !isGrouped || !collapsedGroups.contains(group.title) {
+                visible.append(contentsOf: group.items)
+            }
+        }
+        items = visible
+        sectionTitles = titles.isEmpty ? [""] : titles
+        sectionTotalCounts = counts.isEmpty ? [0] : counts
+        sectionStarts = starts.isEmpty ? [0] : starts
+    }
+
+    private func toggleGroup(_ title: String) {
+        if collapsedGroups.contains(title) {
+            collapsedGroups.remove(title)
+        } else {
+            collapsedGroups.insert(title)
+        }
+        reloadGroupsPreservingSelection()
+    }
+
+    private func reloadGroupsPreservingSelection() {
+        let previouslySelected = Set(selectedItems.map(\.url.pathKey))
+        rebuildVisibleSections()
+        collectionView.reloadData()
+        let paths = items.indices.filter { previouslySelected.contains(items[$0].url.pathKey) }.map { path($0) }
+        collectionView.selectionIndexPaths = Set(paths)
+        delegate?.presenterSelectionDidChange(self)
+    }
+
+    private func expandGroupsContaining(_ keys: Set<String>) {
+        guard isGrouped, !collapsedGroups.isEmpty else { return }
+        var changed = false
+        for group in groups where collapsedGroups.contains(group.title) {
+            if group.items.contains(where: { keys.contains($0.url.pathKey) }) {
+                collapsedGroups.remove(group.title)
+                changed = true
+            }
+        }
+        if changed {
+            rebuildVisibleSections()
+            collectionView.reloadData()
+        }
+    }
+
+    private func groupHeaderMenu(for title: String) -> NSMenu {
+        let menu = NSMenu()
+        let isCollapsed = collapsedGroups.contains(title)
+        let toggle = NSMenuItem(
+            title: isCollapsed ? String(localized: "Expand group") : String(localized: "Collapse group"),
+            action: #selector(toggleGroupFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        toggle.target = self
+        toggle.representedObject = title
+        menu.addItem(toggle)
+        menu.addItem(.separator())
+        let expandAll = NSMenuItem(title: String(localized: "Expand all groups"), action: #selector(expandAllGroups), keyEquivalent: "")
+        expandAll.target = self
+        expandAll.isEnabled = !collapsedGroups.isEmpty
+        menu.addItem(expandAll)
+        let collapseAll = NSMenuItem(title: String(localized: "Collapse all groups"), action: #selector(collapseAllGroups), keyEquivalent: "")
+        collapseAll.target = self
+        collapseAll.isEnabled = collapsedGroups.count < groups.count
+        menu.addItem(collapseAll)
+        return menu
+    }
+
+    @objc private func toggleGroupFromMenu(_ sender: NSMenuItem) {
+        if let title = sender.representedObject as? String { toggleGroup(title) }
+    }
+
+    @objc private func expandAllGroups() {
+        collapsedGroups = []
+        reloadGroupsPreservingSelection()
+    }
+
+    @objc private func collapseAllGroups() {
+        collapsedGroups = Set(groups.map(\.title))
+        reloadGroupsPreservingSelection()
     }
 
     func updateDecorations(_ newContext: PresentationContext) {
@@ -212,6 +308,7 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
     func select(_ urls: Set<URL>, scroll: Bool) {
         guard renamingURL == nil else { return }  // changing selection would end the edit
         let keys = pathKeys(urls)
+        expandGroupsContaining(keys)
         let paths = Set(items.indices.filter { keys.contains(items[$0].url.pathKey) }.map { path($0) })
         collectionView.selectionIndexPaths = paths
         if scroll, let first = paths.min() { collectionView.scrollToItems(at: [first], scrollPosition: .nearestHorizontalEdge) }
@@ -255,6 +352,7 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
     // MARK: Rename
 
     func beginRename(_ url: URL) {
+        expandGroupsContaining([url.pathKey])
         guard let index = items.firstIndex(where: { $0.url.isSameItem(as: url) }) else { return }
         let target = path(index)
         collectionView.selectionIndexPaths = [target]
@@ -319,7 +417,11 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
     func collectionView(_ collectionView: NSCollectionView, viewForSupplementaryElementOfKind kind: NSCollectionView.SupplementaryElementKind, at indexPath: IndexPath) -> NSView {
         let header = collectionView.makeSupplementaryView(ofKind: kind, withIdentifier: GridGroupHeader.identifier, for: indexPath)
         if let header = header as? GridGroupHeader, sectionTitles.indices.contains(indexPath.section) {
-            header.set(title: sectionTitles[indexPath.section], count: sectionCount(indexPath.section))
+            let title = sectionTitles[indexPath.section]
+            let count = sectionTotalCounts.indices.contains(indexPath.section) ? sectionTotalCounts[indexPath.section] : sectionCount(indexPath.section)
+            header.set(title: title, count: count, collapsed: collapsedGroups.contains(title))
+            header.onToggle = { [weak self] in self?.toggleGroup(title) }
+            header.menuProvider = { [weak self] in self?.groupHeaderMenu(for: title) }
         }
         return header
     }
@@ -424,6 +526,7 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
 /// NSCollectionView with double-click to open, right-click selection and type-to-select.
 final class ExplorerCollectionView: NSCollectionView {
     var onDoubleClick: ((IndexPath) -> Void)?
+    var onMiddleClick: ((IndexPath) -> Void)?
     var menuProvider: (() -> NSMenu?)?
     var typeSelectHandler: ((String) -> Void)?
     var onSingleClickOpen: ((IndexPath) -> Void)?
@@ -445,6 +548,16 @@ final class ExplorerCollectionView: NSCollectionView {
         } else if event.clickCount == 2, let path {
             onDoubleClick?(path)
         }
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        if event.buttonNumber == 2 {
+            if let path = indexPathForItem(at: convert(event.locationInWindow, from: nil)) {
+                onMiddleClick?(path)
+            }
+            return
+        }
+        super.otherMouseUp(with: event)
     }
 
     override func updateTrackingAreas() {
@@ -482,10 +595,10 @@ final class ExplorerCollectionView: NSCollectionView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // Like Explorer, an arrow key with nothing selected selects the first item.
+        // Like Explorer, an arrow key with nothing selected selects the first visible item.
         if selectionIndexPaths.isEmpty, [KeyCode.left, KeyCode.right, KeyCode.up, KeyCode.down].contains(event.keyCode),
-           numberOfSections > 0, numberOfItems(inSection: 0) > 0 {
-            let first = IndexPath(item: 0, section: 0)
+           let firstSection = (0..<numberOfSections).first(where: { numberOfItems(inSection: $0) > 0 }) {
+            let first = IndexPath(item: 0, section: firstSection)
             selectionIndexPaths = [first]
             scrollToItems(at: [first], scrollPosition: .nearestHorizontalEdge)
             delegate?.collectionView?(self, didSelectItemsAt: [first])
@@ -669,20 +782,30 @@ final class IconItemView: NSView {
     }
 }
 
-/// A group header in the icon layouts: "Today (3)" followed by a hairline.
+/// A collapsible group header in the icon layouts: chevron + "Today (3)" followed by a hairline.
 final class GridGroupHeader: NSView, NSCollectionViewElement {
     static let identifier = NSUserInterfaceItemIdentifier("GridGroupHeader")
+    var onToggle: (() -> Void)?
+    var menuProvider: (() -> NSMenu?)?
+    private let chevron = NSImageView()
     private let label = NSTextField.label("", size: 12.5, weight: .semibold, color: .controlAccentColor)
     private let line = NSBox()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+        chevron.contentTintColor = .controlAccentColor
         line.boxType = .separator
         line.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(chevron)
         addSubview(label)
         addSubview(line)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            chevron.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
+            chevron.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            chevron.widthAnchor.constraint(equalToConstant: 12),
+            chevron.heightAnchor.constraint(equalToConstant: 12),
+            label.leadingAnchor.constraint(equalTo: chevron.trailingAnchor, constant: 4),
             label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
             line.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 8),
             line.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
@@ -692,7 +815,16 @@ final class GridGroupHeader: NSView, NSCollectionViewElement {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func set(title: String, count: Int) {
+    func set(title: String, count: Int, collapsed: Bool) {
+        chevron.image = NSImage.symbol(collapsed ? "chevron.right" : "chevron.down", size: 10, weight: .semibold)
         label.stringValue = "\(title) (\(count))"
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        onToggle?()
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        menuProvider?()
     }
 }

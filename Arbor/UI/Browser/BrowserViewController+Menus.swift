@@ -22,7 +22,7 @@ extension BrowserViewController {
         let allFiles = items.allSatisfy { !$0.isFolder }
 
         let open = menuItem(String(localized: "Open"), #selector(openSelection(_:)), urls: urls)
-        open.attributedTitle = NSAttributedString(string: "Open", attributes: [.font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)])
+        open.attributedTitle = NSAttributedString(string: open.title, attributes: [.font: NSFont.boldSystemFont(ofSize: NSFont.systemFontSize)])
         menu.addItem(open)
         if allFolders {
             menu.addItem(menuItem(String(localized: "Open in new tab"), #selector(openInNewTab(_:)), symbol: "plus.square.on.square", urls: urls))
@@ -168,6 +168,7 @@ extension BrowserViewController {
         showMenu.addItem(compact)
         showMenu.addItem(menuItem(String(localized: "Navigation pane"), #selector(toggleNavigationPane(_:))))
         showMenu.addItem(menuItem(String(localized: "Preview pane"), #selector(togglePreviewPane(_:)), key: "p", modifiers: [.option]))
+        showMenu.addItem(menuItem(String(localized: "Details pane"), #selector(toggleDetailsPane(_:)), key: "p", modifiers: [.option, .shift]))
         showMenu.addItem(.separator())
         let checkBoxes = menuItem(String(localized: "Item check boxes"), #selector(toggleOption(_:)))
         checkBoxes.representedObject = FolderOption.itemCheckBoxes.rawValue
@@ -264,7 +265,7 @@ extension BrowserViewController {
         menu.addItem(menuItem(String(localized: "Copy as path"), #selector(copyAsPath(_:)), symbol: "link", urls: urls))
         menu.addItem(.separator())
         if node.kind != .volume {
-            menu.addItem(menuItem(Preferences.shared.isPinned(url) ? "Unpin from Quick access" : "Pin to Quick access", #selector(togglePin(_:)), symbol: "pin", urls: urls))
+            menu.addItem(menuItem(Preferences.shared.isPinned(url) ? String(localized: "Unpin from Quick access") : String(localized: "Pin to Quick access"), #selector(togglePin(_:)), symbol: "pin", urls: urls))
         }
         menu.addItem(menuItem(String(localized: "Open in Terminal"), #selector(openInTerminal(_:)), symbol: "terminal", urls: urls))
         menu.addItem(menuItem(String(localized: "Show in Finder"), #selector(showInFinder(_:)), symbol: "macwindow", urls: urls))

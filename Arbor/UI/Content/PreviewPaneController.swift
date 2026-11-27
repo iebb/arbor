@@ -76,7 +76,7 @@ final class PreviewPaneController: NSViewController {
             nameLabel.stringValue = item.name
             var info = [item.kind]
             if let size = item.size { info.append(Format.bytes(size)) }
-            if let modified = item.modified { info.append("Modified \(Format.date(modified))") }
+            if let modified = item.modified { info.append(String(localized: "Modified \(Format.date(modified))")) }
             infoLabel.stringValue = info.joined(separator: " · ")
         } else {
             previewView?.previewItem = nil

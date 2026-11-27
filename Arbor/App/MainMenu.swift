@@ -132,6 +132,7 @@ enum MainMenu {
         menu.addItem(.separator())
         menu.addItem(item(String(localized: "Navigation Pane"), #selector(B.toggleNavigationPane(_:)), "s", [.command, .control]))
         menu.addItem(item(String(localized: "Preview Pane"), #selector(B.togglePreviewPane(_:)), "p", [.command, .option]))
+        menu.addItem(item(String(localized: "Details Pane"), #selector(B.toggleDetailsPane(_:)), "p", [.command, .option, .shift]))
         menu.addItem(item(String(localized: "File Name Extensions"), #selector(B.toggleFileExtensions(_:))))
         menu.addItem(item(String(localized: "Hidden Items"), #selector(B.toggleHiddenItems(_:)), ".", [.command, .shift]))
         menu.addItem(item(String(localized: "Item Check Boxes"), #selector(B.toggleOption(_:)), object: FolderOption.itemCheckBoxes.rawValue))
@@ -205,7 +206,7 @@ final class RecentFilesMenu: NSObject, NSMenuDelegate {
         menu.removeAllItems()
         let files = Preferences.shared[.showRecentFiles] ? RecentItems.shared.recentFiles() : []
         if files.isEmpty {
-            let empty = NSMenuItem(title: Preferences.shared[.showRecentFiles] ? "No Recent Files" : "Recent Files Are Turned Off", action: nil, keyEquivalent: "")
+            let empty = NSMenuItem(title: Preferences.shared[.showRecentFiles] ? String(localized: "No Recent Files") : String(localized: "Recent Files Are Turned Off"), action: nil, keyEquivalent: "")
             empty.isEnabled = false
             menu.addItem(empty)
             return

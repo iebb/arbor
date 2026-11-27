@@ -172,6 +172,8 @@ final class FolderOptionsTests: XCTestCase {
         XCTAssertFalse(FolderOption.singleClickToOpen.defaultValue)
         XCTAssertTrue(FolderOption.searchSystemDirectories.defaultValue)
         XCTAssertFalse(FolderOption.searchFileContents.defaultValue)
+        XCTAssertFalse(FolderOption.showDetailsPane.defaultValue)
+        XCTAssertFalse(FolderOption.showDetailsPane.postsChange)
     }
 
     func testEveryDialogOptionBelongsToOneTab() {
@@ -255,6 +257,27 @@ final class SearchServiceTests: XCTestCase {
     func testWildcards() async {
         let found = await names("*.zip")
         XCTAssertEqual(found, ["bundle.zip"])
+    }
+
+    func testSpotlightQueryFormatting() {
+        XCTAssertNil(SearchService.spotlightQuery(for: "   ", searchContents: false))
+        XCTAssertEqual(
+            SearchService.spotlightQuery(for: "report", searchContents: false),
+            "kMDItemFSName == '*report*'cd"
+        )
+        XCTAssertEqual(
+            SearchService.spotlightQuery(for: "report", searchContents: true),
+            "(kMDItemFSName == '*report*'cd || kMDItemTextContent == '*report*'cd)"
+        )
+        XCTAssertEqual(
+            SearchService.spotlightQuery(for: "*.pdf", searchContents: true),
+            "kMDItemFSName == '*.pdf'cd"
+        )
+        XCTAssertEqual(
+            SearchService.spotlightQuery(for: "it's", searchContents: false),
+            "kMDItemFSName == '*it\\'s*'cd"
+        )
+        XCTAssertFalse(SearchService.isSpotlightIndexed(root))
     }
 }
 

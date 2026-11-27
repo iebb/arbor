@@ -60,6 +60,8 @@ extension BrowserViewController {
             showProperties(nil)
         case (KeyCode.p, [.option]):
             togglePreviewPane(nil)
+        case (KeyCode.p, [.option, .shift]):
+            toggleDetailsPane(nil)
         case (KeyCode.n, [.control, .shift]):
             newFolder(nil)
         case (KeyCode.space, []):
@@ -105,6 +107,10 @@ extension BrowserViewController: ItemPresenterDelegate {
         open(items)
     }
 
+    func presenter(_ presenter: ItemPresenter, openInNewTab items: [FileItem]) {
+        open(items, inNewTab: true)
+    }
+
     func presenter(_ presenter: ItemPresenter, menuFor items: [FileItem]) -> NSMenu? {
         itemMenu(for: items)
     }
@@ -146,6 +152,10 @@ extension BrowserViewController: ItemPresenterDelegate {
 extension BrowserViewController: NavigationPaneDelegate {
     func navigationPane(_ pane: NavigationPaneController, didSelect location: Location) {
         navigate(to: location)
+    }
+
+    func navigationPane(_ pane: NavigationPaneController, openInNewTab location: Location) {
+        AppDelegate.shared.openTab(location, from: view.window)
     }
 
     func navigationPane(_ pane: NavigationPaneController, menuFor node: TreeNode) -> NSMenu? {
@@ -267,6 +277,7 @@ extension BrowserViewController: CommandBarDelegate {
     func commandBarShare(from button: NSButton) { share(targetURLs(nil), from: button) }
     func commandBarDelete() { moveToTrash(nil) }
     func commandBarTogglePreview() { togglePreviewPane(nil) }
+    func commandBarToggleDetails() { toggleDetailsPane(nil) }
 }
 
 // MARK: - Quick Look (Space)

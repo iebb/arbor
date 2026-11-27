@@ -104,7 +104,10 @@ extension BrowserViewController: NSMenuItemValidation {
             menuItem.state = navigationSplitItem.isCollapsed ? .off : .on
             return true
         case #selector(togglePreviewPane(_:)):
-            menuItem.state = previewSplitItem.isCollapsed ? .off : .on
+            menuItem.state = (!previewSplitItem.isCollapsed && sidePaneMode == .preview) ? .on : .off
+            return true
+        case #selector(toggleDetailsPane(_:)):
+            menuItem.state = (!previewSplitItem.isCollapsed && sidePaneMode == .details) ? .on : .off
             return true
         case #selector(toggleFileExtensions(_:)):
             menuItem.state = Preferences.shared.showExtensions ? .on : .off
@@ -118,7 +121,9 @@ extension BrowserViewController: NSMenuItemValidation {
             return true
         case #selector(togglePin(_:)):
             let urls = targetURLs(menuItem)
-            menuItem.title = !urls.isEmpty && urls.allSatisfy(Preferences.shared.isPinned) ? "Unpin from Quick access" : "Pin to Quick access"
+            menuItem.title = !urls.isEmpty && urls.allSatisfy(Preferences.shared.isPinned)
+                ? String(localized: "Unpin from Quick access")
+                : String(localized: "Pin to Quick access")
             return canPerform(menuItem.action, sender: menuItem)
         default:
             return canPerform(menuItem.action, sender: menuItem)
@@ -484,7 +489,13 @@ extension BrowserViewController: NSMenuItemValidation {
     }
 
     @objc func togglePreviewPane(_ sender: Any?) {
-        setPreviewPaneVisible(previewSplitItem.isCollapsed)
+        let isShowing = !previewSplitItem.isCollapsed && sidePaneMode == .preview
+        setSidePane(isShowing ? .none : .preview)
+    }
+
+    @objc func toggleDetailsPane(_ sender: Any?) {
+        let isShowing = !previewSplitItem.isCollapsed && sidePaneMode == .details
+        setSidePane(isShowing ? .none : .details)
     }
 
     @objc func toggleFileExtensions(_ sender: Any?) {

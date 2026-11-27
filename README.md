@@ -18,18 +18,21 @@ Finder, and dark mode.
   a › menu of subfolders; long paths collapse into a « menu; click empty space (or ⌘L / Alt+D / F4)
   to type a path with folder **autocomplete**. Accepts `~`, relative paths, quoted paths,
   `This Mac`, and URLs. Typing a file path opens the file. Right-click Back/Forward for history.
-- **Search box** — searches the current folder and its subfolders as you type; supports wildcards
-  (`*.pdf`, `IMG_????.jpg`). Results show a Folder column.
-- **Command bar** — New ▾ · Cut · Copy · Paste · Rename · Share · Delete · Sort ▾ · View ▾ · ⋯ · Preview.
+- **Search box** — Spotlight-accelerated search across the current folder and its subfolders as you type,
+  with automatic filesystem fallback for unindexed folders, hidden items, and ZIP archives; supports
+  wildcards (`*.pdf`, `IMG_????.jpg`). Results show a Folder column.
+- **Command bar** — New ▾ · Cut · Copy · Paste · Rename · Share · Delete · Sort ▾ · View ▾ · ⋯ · Preview · Details.
 - **Navigation pane** — Home, iCloud Drive, pinned Quick access folders, This Mac › drives › folders.
-  Expands to the open folder; drop files on any folder.
+  Expands to the open folder; drop files on any folder; middle-click any folder to open in a new tab.
 - **Status bar** — item count, selection count and size, Details / Large icons toggles.
 
 **Views** — Extra large, Large, Medium and Small icons, List, **Details**, Tiles and **Content**
-(⌃⇧1…8, as in Explorer). **Group by** Name, Date modified, Type or Size, with Explorer's groups
-("Today", "Last week", "Tiny (0 – 16 KB)"…). Photos, videos and PDFs get thumbnails. Every folder remembers its own
+(⌃⇧1…8, as in Explorer). **Group by** Name, Date modified, Type or Size, with collapsible Explorer groups
+("Today", "Last week", "Tiny (0 – 16 KB)"…) — click a header to collapse/expand, or right-click to
+collapse/expand all. Photos, videos and PDFs get thumbnails. Every folder remembers its own
 layout and sort order. **This Mac** page with your folders and drives, with free-space bars.
-**Preview pane** (⌥P) powered by Quick Look.
+**Preview pane** (⌥P) powered by Quick Look, and **Details pane** (⌥⇧P) showing large thumbnails,
+file metadata, media dimensions/duration, and live folder size.
 
 **Details view** — Name, Date modified, Type, Size (in KB, as Explorer shows it), Date created and
 a Folder column for search results. Click headers to sort (folders stay grouped); right-click the
@@ -103,6 +106,7 @@ usually ⌘+key).
 | Refresh | F5 | ⌘R |
 | Properties | Alt+Enter | ⌘I |
 | Preview pane | Alt+P | ⌥⌘P |
+| Details pane | Alt+Shift+P | ⇧⌥⌘P |
 | Quick Look | | Space, ⌘Y |
 | Layouts | Ctrl+Shift+1…8 | ⌃⇧1…8 |
 | Connect to Server | | ⌘K |
@@ -191,7 +195,7 @@ Design notes:
 
 ## Roadmap
 
-Ideas for later: Spotlight-backed search, collapsible groups, more languages, and signed, notarized
+Ideas for later: more languages, dual-pane / split-view mode, and signed, notarized
 releases with automatic updates.
 
 ## License

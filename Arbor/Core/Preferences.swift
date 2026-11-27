@@ -86,6 +86,7 @@ enum FolderOption: String, CaseIterable {
     case compactView = "CompactView"
     case showNavigationPane = "ShowNavigationPane"
     case showPreviewPane = "ShowPreviewPane"
+    case showDetailsPane = "ShowDetailsPane"
 
     var defaultValue: Bool {
         switch self {
@@ -99,7 +100,7 @@ enum FolderOption: String, CaseIterable {
     }
 
     /// Pane visibility is window layout, not a setting other views react to.
-    var postsChange: Bool { self != .showNavigationPane && self != .showPreviewPane }
+    var postsChange: Bool { self != .showNavigationPane && self != .showPreviewPane && self != .showDetailsPane }
 
     static let generalTab: [FolderOption] = [.openFoldersInNewWindow, .singleClickToOpen, .underlineOnlyOnHover, .showRecentFiles, .showFrequentFolders]
     static let viewTab: [FolderOption] = [
@@ -166,6 +167,7 @@ final class Preferences {
     var expandToOpenFolder: Bool { self[.expandToOpenFolder] }
     var backspaceGoesBack: Bool { self[.backspaceGoesBack] }
     var showPreviewPane: Bool { get { self[.showPreviewPane] } set { self[.showPreviewPane] = newValue } }
+    var showDetailsPane: Bool { get { self[.showDetailsPane] } set { self[.showDetailsPane] = newValue } }
     var showNavigationPane: Bool { get { self[.showNavigationPane] } set { self[.showNavigationPane] = newValue } }
 
     /// The system-wide shortcut that opens a new Arbor window (Explorer's Win+E). Off by default,

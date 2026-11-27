@@ -1,4 +1,5 @@
 import AppKit
+import CoreServices
 import UniformTypeIdentifiers
 
 /// Reads folder contents off the main thread.
@@ -135,10 +136,52 @@ struct SearchOptions {
     }
 }
 
-/// Recursive search below a folder, streaming results in batches. Matches names, and optionally
-/// the names of files inside ZIP archives and the text inside files.
+/// Recursive search below a folder, streaming results in batches. Uses Spotlight (`MDQuery`)
+/// when the folder is indexed for instant results, and falls back to filesystem enumeration
+/// for unindexed locations, hidden items, or ZIP archive contents.
 enum SearchService {
     static let maxContentSize = 16 * 1024 * 1024
+
+    /// Builds a Spotlight (`MDQuery`) predicate string for Explorer's search syntax.
+    static func spotlightQuery(for rawQuery: String, searchContents: Bool) -> String? {
+        let matcher = NameMatcher(rawQuery)
+        guard !matcher.query.isEmpty else { return nil }
+        let escaped = escapeSpotlight(matcher.query, keepWildcards: matcher.usesWildcards)
+        let namePattern = matcher.usesWildcards ? escaped : "*\(escaped)*"
+        let nameClause = "kMDItemFSName == '\(namePattern)'cd"
+        if searchContents, !matcher.usesWildcards {
+            return "(\(nameClause) || kMDItemTextContent == '*\(escaped)*'cd)"
+        }
+        return nameClause
+    }
+
+    private static func escapeSpotlight(_ text: String, keepWildcards: Bool) -> String {
+        var out = ""
+        for ch in text {
+            switch ch {
+            case "\\", "'", "\"":
+                out.append("\\")
+                out.append(ch)
+            case "*", "?":
+                if !keepWildcards { out.append("\\") }
+                out.append(ch)
+            default:
+                out.append(ch)
+            }
+        }
+        return out
+    }
+
+    /// True when macOS Spotlight has metadata for this folder (excludes temp dirs and unindexed volumes).
+    static func isSpotlightIndexed(_ root: URL) -> Bool {
+        let path = root.standardizedFileURL.path
+        if path.hasPrefix("/tmp/") || path == "/tmp" || path.hasPrefix("/private/tmp/") || path == "/private/tmp"
+            || path.hasPrefix("/var/folders/") || path.hasPrefix("/private/var/folders/") {
+            return false
+        }
+        guard let item = MDItemCreateWithURL(kCFAllocatorDefault, root as CFURL) else { return false }
+        return MDItemCopyAttribute(item, kMDItemContentType) != nil
+    }
 
     static func search(root: URL, query: String, options: SearchOptions) -> AsyncStream<[FileItem]> {
         AsyncStream { continuation in
@@ -146,9 +189,40 @@ enum SearchService {
             continuation.onTermination = { _ in flag.cancel() }
             DispatchQueue.global(qos: .userInitiated).async {
                 let matcher = NameMatcher(query)
+                guard !matcher.query.isEmpty else {
+                    continuation.finish()
+                    return
+                }
+                let skipped = options.includeSystemDirectories ? [] : ProtectedFiles.systemDirectories.filter { $0 != root.pathKey }
+                var seen = Set<String>()
+
+                // Fast path: Spotlight index.
+                let indexed = isSpotlightIndexed(root)
+                if indexed, let predicate = spotlightQuery(for: query, searchContents: options.searchContents) {
+                    runSpotlight(
+                        root: root,
+                        predicate: predicate,
+                        options: options,
+                        skipped: skipped,
+                        flag: flag,
+                        seen: &seen,
+                        yield: { continuation.yield($0) }
+                    )
+                    // When Spotlight covers the whole query (no ZIP internals, no hidden dotfiles), we're done.
+                    if !options.includeCompressedFiles && !options.showHidden {
+                        continuation.finish()
+                        return
+                    }
+                }
+
+                if flag.isCancelled {
+                    continuation.finish()
+                    return
+                }
+
+                // Fallback / supplement: direct filesystem walk.
                 var enumerationOptions: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
                 if !options.showHidden { enumerationOptions.insert(.skipsHiddenFiles) }
-                let skipped = options.includeSystemDirectories ? [] : ProtectedFiles.systemDirectories.filter { $0 != root.pathKey }
                 let keys = FileItem.resourceKeys + [.fileSizeKey]
                 guard let enumerator = FileManager().enumerator(
                     at: root,
@@ -171,7 +245,10 @@ enum SearchService {
                         enumerator.skipDescendants()
                         continue
                     }
+                    let key = url.pathKey
+                    if seen.contains(key) { continue }
                     if matches(url, matcher: matcher, options: options), let item = FileItem(url: url) {
+                        seen.insert(key)
                         batch.append(item)
                     }
                     if !batch.isEmpty, batch.count >= 250 || Date().timeIntervalSince(lastFlush) > 0.3 {
@@ -184,6 +261,56 @@ enum SearchService {
                 continuation.finish()
             }
         }
+    }
+
+    private static func runSpotlight(
+        root: URL,
+        predicate: String,
+        options: SearchOptions,
+        skipped: [String],
+        flag: CancellationFlag,
+        seen: inout Set<String>,
+        yield: ([FileItem]) -> Void
+    ) {
+        guard let mdQuery = MDQueryCreate(kCFAllocatorDefault, predicate as CFString, nil, nil) else { return }
+        MDQuerySetSearchScope(mdQuery, [root.path] as CFArray, 0)
+        guard MDQueryExecute(mdQuery, CFOptionFlags(kMDQuerySynchronous.rawValue)) else { return }
+        let count = MDQueryGetResultCount(mdQuery)
+        var batch: [FileItem] = []
+        var lastFlush = Date()
+        for index in 0..<count {
+            if flag.isCancelled { break }
+            guard let raw = MDQueryGetResultAtIndex(mdQuery, index) else { continue }
+            let mdItem = Unmanaged<MDItem>.fromOpaque(raw).takeUnretainedValue()
+            guard let path = MDItemCopyAttribute(mdItem, kMDItemPath) as? String else { continue }
+            let url = URL(fileURLWithPath: path)
+            let key = url.pathKey
+            if seen.contains(key) { continue }
+            if !skipped.isEmpty, skipped.contains(where: { key == $0 || key.hasPrefix($0 + "/") }) { continue }
+            if options.hideProtected, ProtectedFiles.isProtected(url) { continue }
+            if !options.showHidden, isPathHidden(url, below: root) { continue }
+            if let item = FileItem(url: url) {
+                seen.insert(key)
+                batch.append(item)
+            }
+            if batch.count >= 250 || (!batch.isEmpty && Date().timeIntervalSince(lastFlush) > 0.25) {
+                yield(batch)
+                batch = []
+                lastFlush = Date()
+            }
+        }
+        if !batch.isEmpty { yield(batch) }
+    }
+
+    private static func isPathHidden(_ url: URL, below root: URL) -> Bool {
+        let rootKey = root.pathKey
+        var cursor = url
+        while cursor.pathKey != rootKey && cursor.pathKey != "/" {
+            if cursor.lastPathComponent.hasPrefix(".") { return true }
+            if (try? cursor.resourceValues(forKeys: [.isHiddenKey]))?.isHidden == true { return true }
+            cursor = cursor.deletingLastPathComponent()
+        }
+        return false
     }
 
     private static func matches(_ url: URL, matcher: NameMatcher, options: SearchOptions) -> Bool {

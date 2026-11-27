@@ -6,10 +6,12 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     let tableView = ExplorerTableView()
     /// All items, in display order (flattened across groups).
     private var items: [FileItem] = []
+    /// Collapsed group titles for the current folder/grouping.
+    private var collapsedGroups: Set<String> = []
     /// What each table row shows: an item, or a group header ("Today (3)").
     private var rows: [Row] = []
     private enum Row {
-        case header(String, count: Int)
+        case header(String, count: Int, collapsed: Bool)
         case item(FileItem)
     }
 
@@ -18,16 +20,23 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
         return item
     }
 
+    private func headerTitle(_ row: Int) -> String? {
+        guard rows.indices.contains(row), case .header(let title, _, _) = rows[row] else { return nil }
+        return title
+    }
+
     private var itemRows: [Int] { rows.indices.filter { item($0) != nil } }
 
     private func row(of url: URL) -> Int? {
         rows.indices.first { item($0)?.url.isSameItem(as: url) == true }
     }
 
-    private static func buildRows(_ items: [FileItem], groupBy: GroupKey) -> [Row] {
+    private static func buildRows(_ items: [FileItem], groupBy: GroupKey, collapsed: Set<String>) -> [Row] {
         guard groupBy != .none else { return items.map(Row.item) }
         return FileGrouping.groups(items, by: groupBy).flatMap { group in
-            [Row.header(group.title, count: group.items.count)] + group.items.map(Row.item)
+            let isCollapsed = collapsed.contains(group.title)
+            let header = Row.header(group.title, count: group.items.count, collapsed: isCollapsed)
+            return isCollapsed ? [header] : [header] + group.items.map(Row.item)
         }
     }
     private var context = PresentationContext(showExtensions: false, cutPaths: [], isSearch: false, viewMode: .details, sort: SortOrder())
@@ -113,7 +122,18 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
         tableView.headerView?.menu = makeHeaderMenu()
         tableView.menuProvider = { [weak self] row in
             guard let self else { return nil }
+            if let title = self.headerTitle(row) {
+                return self.groupHeaderMenu(for: title)
+            }
             return self.delegate?.presenter(self, menuFor: self.selectedItems)
+        }
+        tableView.onGroupClick = { [weak self] row in
+            guard let self, let title = self.headerTitle(row) else { return }
+            self.toggleGroup(title)
+        }
+        tableView.onMiddleClick = { [weak self] row in
+            guard let self, let item = self.item(row), item.isFolder else { return }
+            self.delegate?.presenter(self, openInNewTab: [item])
         }
         tableView.onSlowClick = { [weak self] row in
             guard let self, let item = self.item(row) else { return }
@@ -155,8 +175,11 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
         }
         deferredShow = nil
         let previouslySelected = Set(selectedItems.map(\.url.pathKey))
+        if scrollToTop || newContext.groupBy != context.groupBy {
+            collapsedGroups = []
+        }
         items = newItems
-        rows = Self.buildRows(newItems, groupBy: newContext.groupBy)
+        rows = Self.buildRows(newItems, groupBy: newContext.groupBy, collapsed: collapsedGroups)
         context = newContext
         tableView.tableColumn(withIdentifier: Column.folder.identifier)?.isHidden = !newContext.isSearch
         applyRowHeight()
@@ -167,6 +190,80 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
         let selectedRows = IndexSet(itemRows.filter { previouslySelected.contains(item($0)!.url.pathKey) })
         tableView.selectRowIndexes(selectedRows, byExtendingSelection: false)
         if scrollToTop { tableView.scrollRowToVisible(0) }
+    }
+
+    // MARK: Collapsible groups
+
+    private func toggleGroup(_ title: String) {
+        if collapsedGroups.contains(title) {
+            collapsedGroups.remove(title)
+        } else {
+            collapsedGroups.insert(title)
+        }
+        rebuildRowsPreservingSelection()
+    }
+
+    private func rebuildRowsPreservingSelection() {
+        let previouslySelected = Set(selectedItems.map(\.url.pathKey))
+        rows = Self.buildRows(items, groupBy: context.groupBy, collapsed: collapsedGroups)
+        tableView.reloadData()
+        let selectedRows = IndexSet(itemRows.filter { previouslySelected.contains(item($0)!.url.pathKey) })
+        tableView.selectRowIndexes(selectedRows, byExtendingSelection: false)
+        delegate?.presenterSelectionDidChange(self)
+    }
+
+    private func expandGroupsContaining(_ keys: Set<String>) {
+        guard context.groupBy != .none, !collapsedGroups.isEmpty else { return }
+        let groups = FileGrouping.groups(items, by: context.groupBy)
+        var changed = false
+        for group in groups where collapsedGroups.contains(group.title) {
+            if group.items.contains(where: { keys.contains($0.url.pathKey) }) {
+                collapsedGroups.remove(group.title)
+                changed = true
+            }
+        }
+        if changed {
+            rows = Self.buildRows(items, groupBy: context.groupBy, collapsed: collapsedGroups)
+            tableView.reloadData()
+        }
+    }
+
+    private func groupHeaderMenu(for title: String) -> NSMenu {
+        let menu = NSMenu()
+        let isCollapsed = collapsedGroups.contains(title)
+        let toggle = NSMenuItem(
+            title: isCollapsed ? String(localized: "Expand group") : String(localized: "Collapse group"),
+            action: #selector(toggleGroupFromMenu(_:)),
+            keyEquivalent: ""
+        )
+        toggle.target = self
+        toggle.representedObject = title
+        menu.addItem(toggle)
+        menu.addItem(.separator())
+        let expandAll = NSMenuItem(title: String(localized: "Expand all groups"), action: #selector(expandAllGroups), keyEquivalent: "")
+        expandAll.target = self
+        expandAll.isEnabled = !collapsedGroups.isEmpty
+        menu.addItem(expandAll)
+        let allTitles = Set(FileGrouping.groups(items, by: context.groupBy).map(\.title))
+        let collapseAll = NSMenuItem(title: String(localized: "Collapse all groups"), action: #selector(collapseAllGroups), keyEquivalent: "")
+        collapseAll.target = self
+        collapseAll.isEnabled = collapsedGroups.count < allTitles.count
+        menu.addItem(collapseAll)
+        return menu
+    }
+
+    @objc private func toggleGroupFromMenu(_ sender: NSMenuItem) {
+        if let title = sender.representedObject as? String { toggleGroup(title) }
+    }
+
+    @objc private func expandAllGroups() {
+        collapsedGroups = []
+        rebuildRowsPreservingSelection()
+    }
+
+    @objc private func collapseAllGroups() {
+        collapsedGroups = Set(FileGrouping.groups(items, by: context.groupBy).map(\.title))
+        rebuildRowsPreservingSelection()
     }
 
     private func applyRowHeight() {
@@ -184,6 +281,7 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     func select(_ urls: Set<URL>, scroll: Bool) {
         guard renamingURL == nil else { return }  // changing selection would end the edit
         let keys = pathKeys(urls)
+        expandGroupsContaining(keys)
         let matching = IndexSet(itemRows.filter { keys.contains(item($0)!.url.pathKey) })
         tableView.selectRowIndexes(matching, byExtendingSelection: false)
         if scroll, let first = matching.first { tableView.scrollRowToVisible(first) }
@@ -211,6 +309,7 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     // MARK: Rename
 
     func beginRename(_ url: URL) {
+        expandGroupsContaining([url.pathKey])
         guard let row = row(of: url), let target = item(row),
               let columnIndex = tableView.tableColumns.firstIndex(where: { $0.identifier == Column.name.identifier }) else { return }
         tableView.selectRowIndexes([row], byExtendingSelection: false)
@@ -330,10 +429,10 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        if rows.indices.contains(row), case .header(let title, let count) = rows[row] {
+        if rows.indices.contains(row), case .header(let title, let count, let collapsed) = rows[row] {
             let identifier = NSUserInterfaceItemIdentifier("GroupHeader")
             let header = tableView.makeView(withIdentifier: identifier, owner: self) as? GroupHeaderView ?? GroupHeaderView(identifier: identifier)
-            header.set(title: title, count: count)
+            header.set(title: title, count: count, collapsed: collapsed)
             return header
         }
         guard let tableColumn, let column = Column(rawValue: tableColumn.identifier.rawValue), let item = item(row) else { return nil }
@@ -462,6 +561,8 @@ final class HeaderMenuStateUpdater: NSObject, NSMenuDelegate {
 /// NSTableView with Explorer mouse behaviour: right-click selects, and a slow second click renames.
 final class ExplorerTableView: NSTableView {
     var menuProvider: ((Int) -> NSMenu?)?
+    var onGroupClick: ((Int) -> Void)?
+    var onMiddleClick: ((Int) -> Void)?
     var onSlowClick: ((Int) -> Void)?
     var onSingleClickOpen: ((Int) -> Void)?
     var onHover: ((Int) -> Void)?
@@ -489,6 +590,9 @@ final class ExplorerTableView: NSTableView {
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let row = row(at: convert(event.locationInWindow, from: nil))
+        if row >= 0, delegate?.tableView?(self, isGroupRow: row) == true {
+            return menuProvider?(row)
+        }
         if row >= 0 {
             if !selectedRowIndexes.contains(row) { selectRowIndexes([row], byExtendingSelection: false) }
         } else {
@@ -502,6 +606,10 @@ final class ExplorerTableView: NSTableView {
         NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(fireSlowClick), object: nil)
         let point = convert(event.locationInWindow, from: nil)
         let row = row(at: point)
+        if row >= 0, delegate?.tableView?(self, isGroupRow: row) == true {
+            onGroupClick?(row)
+            return
+        }
         let column = column(at: point)
         let onName = column >= 0 && tableColumns[column].identifier.rawValue == DetailsViewController.Column.name.rawValue
         let plainClick = event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty
@@ -521,6 +629,15 @@ final class ExplorerTableView: NSTableView {
             slowClickRow = row
             perform(#selector(fireSlowClick), with: nil, afterDelay: NSEvent.doubleClickInterval + 0.05)
         }
+    }
+
+    override func otherMouseUp(with event: NSEvent) {
+        if event.buttonNumber == 2 {
+            let row = row(at: convert(event.locationInWindow, from: nil))
+            if row >= 0 { onMiddleClick?(row) }
+            return
+        }
+        super.otherMouseUp(with: event)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -624,20 +741,28 @@ final class TextCellView: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 }
 
-/// Explorer's group header: String(localized: "Today (3)") followed by a hairline.
+/// Explorer's collapsible group header: chevron + "Today (3)" followed by a hairline.
 final class GroupHeaderView: NSTableCellView {
+    private let chevron = NSImageView()
     private let label = NSTextField.label("", size: 12.5, weight: .semibold, color: .controlAccentColor)
     private let line = NSBox()
 
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
         self.identifier = identifier
+        chevron.translatesAutoresizingMaskIntoConstraints = false
+        chevron.contentTintColor = .controlAccentColor
         line.boxType = .separator
         line.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(chevron)
         addSubview(label)
         addSubview(line)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            chevron.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            chevron.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+            chevron.widthAnchor.constraint(equalToConstant: 12),
+            chevron.heightAnchor.constraint(equalToConstant: 12),
+            label.leadingAnchor.constraint(equalTo: chevron.trailingAnchor, constant: 4),
             label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
             line.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 8),
             line.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
@@ -647,7 +772,8 @@ final class GroupHeaderView: NSTableCellView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func set(title: String, count: Int) {
+    func set(title: String, count: Int, collapsed: Bool) {
+        chevron.image = NSImage.symbol(collapsed ? "chevron.right" : "chevron.down", size: 10, weight: .semibold)
         label.stringValue = "\(title) (\(count))"
     }
 }

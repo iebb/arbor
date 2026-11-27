@@ -10,6 +10,7 @@ struct CommandState {
     var canShare = false
     var canDelete = false
     var previewVisible = false
+    var detailsVisible = false
 }
 
 protocol CommandBarDelegate: AnyObject {
@@ -24,6 +25,7 @@ protocol CommandBarDelegate: AnyObject {
     func commandBarShare(from button: NSButton)
     func commandBarDelete()
     func commandBarTogglePreview()
+    func commandBarToggleDetails()
 }
 
 /// Explorer's command bar: New ▾ | Cut Copy Paste Rename Share Delete | Sort ▾ View ▾ ⋯ … Preview.
@@ -41,6 +43,7 @@ final class CommandBarView: NSView {
     private lazy var viewButton = HoverButton(symbol: "square.grid.2x2", title: String(localized: "View"), toolTip: String(localized: "Change the layout"), target: self, action: #selector(viewPressed(_:)))
     private lazy var moreButton = HoverButton(symbol: "ellipsis", toolTip: String(localized: "See more"), target: self, action: #selector(morePressed(_:)))
     private lazy var previewButton = HoverButton(symbol: "sidebar.right", title: String(localized: "Preview"), toolTip: String(localized: "Preview pane (⌥P)"), target: self, action: #selector(previewPressed))
+    private lazy var detailsButton = HoverButton(symbol: "info.circle", title: String(localized: "Details"), toolTip: String(localized: "Details pane (⌥⇧P)"), target: self, action: #selector(detailsPressed))
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -54,14 +57,19 @@ final class CommandBarView: NSView {
         left.spacing = 2
         left.translatesAutoresizingMaskIntoConstraints = false
         previewButton.setButtonType(.pushOnPushOff)
+        detailsButton.setButtonType(.pushOnPushOff)
+        let right = NSStackView(views: [previewButton, detailsButton])
+        right.orientation = .horizontal
+        right.spacing = 2
+        right.translatesAutoresizingMaskIntoConstraints = false
         addSubview(left)
-        addSubview(previewButton)
+        addSubview(right)
         NSLayoutConstraint.activate([
             left.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
             left.centerYAnchor.constraint(equalTo: centerYAnchor),
-            previewButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-            previewButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            previewButton.leadingAnchor.constraint(greaterThanOrEqualTo: left.trailingAnchor, constant: 8),
+            right.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            right.centerYAnchor.constraint(equalTo: centerYAnchor),
+            right.leadingAnchor.constraint(greaterThanOrEqualTo: left.trailingAnchor, constant: 8),
         ])
     }
 
@@ -94,6 +102,7 @@ final class CommandBarView: NSView {
         shareButton.isEnabled = state.canShare
         deleteButton.isEnabled = state.canDelete
         previewButton.state = state.previewVisible ? .on : .off
+        detailsButton.state = state.detailsVisible ? .on : .off
     }
 
     @objc private func newPressed(_ sender: HoverButton) { if let menu = delegate?.commandBarNewMenu() { sender.popUp(menu) } }
@@ -107,6 +116,7 @@ final class CommandBarView: NSView {
     @objc private func sharePressed(_ sender: NSButton) { delegate?.commandBarShare(from: sender) }
     @objc private func deletePressed() { delegate?.commandBarDelete() }
     @objc private func previewPressed() { delegate?.commandBarTogglePreview() }
+    @objc private func detailsPressed() { delegate?.commandBarToggleDetails() }
 }
 
 /// Bottom status bar: "24 items | 3 items selected 1.20 MB" and the Details / Large icons toggles.
