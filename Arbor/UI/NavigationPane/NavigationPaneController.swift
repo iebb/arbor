@@ -82,7 +82,9 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
         outlineView.addTableColumn(column)
         outlineView.outlineTableColumn = column
         outlineView.headerView = nil
-        outlineView.style = .sourceList
+        outlineView.style = .inset
+        outlineView.selectionHighlightStyle = .regular
+        outlineView.backgroundColor = .clear
         outlineView.rowSizeStyle = .custom
         outlineView.indentationPerLevel = 12
         outlineView.autoresizesOutlineColumn = false
@@ -374,6 +376,10 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
         (item as? TreeNode)?.kind == .separator ? 9 : (Preferences.shared[.compactView] ? 20 : 24)
     }
 
+    func outlineView(_ outlineView: NSOutlineView, rowViewForItem item: Any) -> NSTableRowView? {
+        NavigationRowView()
+    }
+
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
         (item as? TreeNode)?.kind != .separator
     }
@@ -459,5 +465,20 @@ final class TreeCellView: NSTableCellView {
         textField?.stringValue = title
         imageView?.image = icon
         pinView.isHidden = !pinned
+    }
+}
+
+/// Draws a clean rounded selection pill in the navigation pane (never clips or turns black).
+private final class NavigationRowView: NSTableRowView {
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        guard selectionHighlightStyle != .none else { return }
+        let rect = bounds.insetBy(dx: 8, dy: 1)
+        let color = isEmphasized
+            ? NSColor.controlAccentColor.withAlphaComponent(0.18)
+            : NSColor.labelColor.withAlphaComponent(0.09)
+        color.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 6, yRadius: 6).fill()
     }
 }

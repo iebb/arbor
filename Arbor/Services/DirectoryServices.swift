@@ -430,7 +430,14 @@ enum IconCache {
     static func icon(for url: URL) -> NSImage {
         let key = url.pathKey as NSString
         if let cached = cache.object(forKey: key) { return cached }
-        let image = NSWorkspace.shared.icon(forFile: url.path)
+        let image: NSImage
+        if let docs = FileManager.default.userFolderURL(.documentDirectory),
+           url.isSameItem(as: docs),
+           let clean = NSImage(contentsOfFile: "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/DocumentsFolderIcon.icns") {
+            image = clean
+        } else {
+            image = NSWorkspace.shared.icon(forFile: url.path)
+        }
         cache.setObject(image, forKey: key)
         return image
     }
