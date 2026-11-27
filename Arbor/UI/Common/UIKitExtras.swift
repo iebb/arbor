@@ -80,8 +80,8 @@ enum KeyCode {
     static let d: UInt16 = 2
     static let n: UInt16 = 45
     static let p: UInt16 = 35
-    /// Number row 1…7.
-    static let digits: [UInt16] = [18, 19, 20, 21, 23, 22, 26]
+    /// Number row 1…8.
+    static let digits: [UInt16] = [18, 19, 20, 21, 23, 22, 26, 28]
 }
 
 func functionKey(_ code: Int) -> String {

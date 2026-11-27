@@ -38,16 +38,16 @@ enum Location: Hashable {
 
     var title: String {
         switch self {
-        case .thisMac: return "This Mac"
+        case .thisMac: return String(localized: "This Mac")
         case .folder(let url): return Location.displayName(of: url)
-        case .search(let root, let query): return "\(query) - Search Results in \(Location.displayName(of: root))"
+        case .search(let root, let query): return String(localized: "\(query) - Search Results in \(Location.displayName(of: root))")
         }
     }
 
     /// The text shown when the address bar switches to edit mode.
     var editablePath: String {
         switch self {
-        case .thisMac: return "This Mac"
+        case .thisMac: return String(localized: "This Mac")
         case .folder(let url): return url.pathKey
         case .search(let root, _): return root.pathKey
         }

@@ -257,3 +257,160 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(found, ["bundle.zip"])
     }
 }
+
+final class FolderMergeTests: XCTestCase {
+    private var root: URL!
+    private let fm = FileManager.default
+
+    override func setUpWithError() throws {
+        root = fm.temporaryDirectory.appendingPathComponent("ArborMerge-\(UUID().uuidString)", isDirectory: true)
+        // src/Photos/{a.jpg, same.jpg, Trip/x.jpg}   dst/Photos/{same.jpg, b.jpg, Trip/y.jpg}
+        for path in ["src/Photos/Trip", "dst/Photos/Trip"] {
+            try fm.createDirectory(at: root.appendingPathComponent(path), withIntermediateDirectories: true)
+        }
+        for (path, text) in [("src/Photos/a.jpg", "a"), ("src/Photos/same.jpg", "new"), ("src/Photos/Trip/x.jpg", "x"),
+                             ("dst/Photos/same.jpg", "old"), ("dst/Photos/b.jpg", "b"), ("dst/Photos/Trip/y.jpg", "y")] {
+            try text.write(to: root.appendingPathComponent(path), atomically: true, encoding: .utf8)
+        }
+    }
+
+    override func tearDownWithError() throws { try? fm.removeItem(at: root) }
+
+    private func url(_ path: String) -> URL { root.appendingPathComponent(path) }
+    private func read(_ path: String) -> String? { try? String(contentsOf: url(path), encoding: .utf8) }
+
+    private func planner(file: TransferPlanner.FileChoice, folder: TransferPlanner.FolderChoice, asked: UnsafeMutablePointer<[String]>? = nil) -> TransferPlanner {
+        TransferPlanner(
+            askAboutFile: { conflict in asked?.pointee.append("file:\(conflict.name)"); return (file, false) },
+            askAboutFolder: { conflict in asked?.pointee.append("folder:\(conflict.name)"); return (folder, false) }
+        )
+    }
+
+    /// Applies the ops like FileOperationService does and returns the changes (for undo).
+    private func apply(_ ops: [FileOp]) throws -> [FileChange] {
+        let engine = FileOpEngine(fileManager: fm)
+        return try ops.compactMap { try engine.apply($0) }
+    }
+
+    private func undo(_ changes: [FileChange]) throws {
+        _ = try apply(changes.reversed().compactMap(\.inverse))
+    }
+
+    func testCopyMergeAsksOnlyAboutClashingFiles() throws {
+        var asked: [String] = []
+        let result = withUnsafeMutablePointer(to: &asked) { pointer in
+            planner(file: .replace, folder: .merge, asked: pointer).plan(sources: [url("src/Photos")], into: url("dst"), move: false)
+        }
+        let changes = try apply(try result.get())
+        XCTAssertEqual(asked, ["folder:Photos", "file:same.jpg"], "Trip merges silently; only same.jpg clashes")
+        XCTAssertEqual(read("dst/Photos/a.jpg"), "a")
+        XCTAssertEqual(read("dst/Photos/b.jpg"), "b", "merge keeps files only in the destination")
+        XCTAssertEqual(read("dst/Photos/same.jpg"), "new")
+        XCTAssertEqual(read("dst/Photos/Trip/x.jpg"), "x")
+        XCTAssertEqual(read("dst/Photos/Trip/y.jpg"), "y")
+        XCTAssertEqual(read("src/Photos/a.jpg"), "a", "copy leaves the source alone")
+
+        try undo(changes)
+        XCTAssertNil(read("dst/Photos/a.jpg"))
+        XCTAssertNil(read("dst/Photos/Trip/x.jpg"))
+        XCTAssertEqual(read("dst/Photos/same.jpg"), "old", "undo brings the replaced file back from the Trash")
+    }
+
+    func testMoveMergeRemovesTheEmptiedSourceAndUndoes() throws {
+        let ops = try planner(file: .keepBoth, folder: .merge).plan(sources: [url("src/Photos")], into: url("dst"), move: true).get()
+        let changes = try apply(ops)
+        XCTAssertFalse(fm.fileExists(atPath: url("src/Photos").path), "the emptied source folder is removed")
+        XCTAssertEqual(read("dst/Photos/same.jpg"), "old")
+        XCTAssertEqual(read("dst/Photos/same (2).jpg"), "new")
+        XCTAssertEqual(read("dst/Photos/Trip/x.jpg"), "x")
+
+        try undo(changes)
+        XCTAssertEqual(read("src/Photos/a.jpg"), "a")
+        XCTAssertEqual(read("src/Photos/same.jpg"), "new")
+        XCTAssertEqual(read("src/Photos/Trip/x.jpg"), "x")
+        XCTAssertNil(read("dst/Photos/a.jpg"))
+        XCTAssertNil(read("dst/Photos/same (2).jpg"))
+        XCTAssertEqual(read("dst/Photos/same.jpg"), "old")
+    }
+
+    func testSkippedFileKeepsSourceFolderOnMove() throws {
+        let ops = try planner(file: .skip, folder: .merge).plan(sources: [url("src/Photos")], into: url("dst"), move: true).get()
+        _ = try apply(ops)
+        XCTAssertEqual(read("src/Photos/same.jpg"), "new", "a skipped file stays behind")
+        XCTAssertTrue(fm.fileExists(atPath: url("src/Photos").path), "so its folder isn't removed")
+        XCTAssertEqual(read("dst/Photos/same.jpg"), "old")
+    }
+
+    func testFolderKeepBothAndSkip() throws {
+        _ = try apply(try planner(file: .replace, folder: .keepBoth).plan(sources: [url("src/Photos")], into: url("dst"), move: false).get())
+        XCTAssertEqual(read("dst/Photos (2)/same.jpg"), "new")
+        XCTAssertEqual(read("dst/Photos/same.jpg"), "old")
+
+        let skipped = try planner(file: .replace, folder: .skip).plan(sources: [url("src/Photos")], into: url("dst"), move: false).get()
+        XCTAssertTrue(skipped.isEmpty)
+    }
+
+    func testCancelAndIntoItself() {
+        XCTAssertEqual(planner(file: .replace, folder: .cancel).plan(sources: [url("src/Photos")], into: url("dst"), move: false), .failure(.cancelled))
+        XCTAssertEqual(planner(file: .replace, folder: .merge).plan(sources: [url("src")], into: url("src/Photos"), move: true), .failure(.intoItself(name: "src")))
+    }
+}
+
+final class GroupingTests: XCTestCase {
+    private func item(_ name: String, folder: Bool = false, size: Int64? = nil, modified: Date? = nil, kind: String = "File") -> FileItem {
+        FileItem(url: URL(fileURLWithPath: "/tmp/\(name)"), name: name, isDirectory: folder, isPackage: false,
+                 isSymbolicLink: false, isAlias: false, isHidden: false, size: folder ? nil : size, modified: modified, created: nil,
+                 kind: folder ? "File folder" : kind, contentType: nil, linkedFolderURL: nil)
+    }
+
+    func testNameRanges() {
+        let groups = FileGrouping.groups([item("apple"), item("2024"), item("zebra"), item("Kiwi"), item("日本")], by: .name)
+        XCTAssertEqual(groups.map(\.title), ["0 – 9", "A – H", "I – P", "Q – Z", "Other"])
+    }
+
+    func testSizeBucketsBiggestFirstAndFoldersLast() {
+        let groups = FileGrouping.groups([item("a", size: 0), item("b", size: 5_000), item("c", size: 5_000_000_000), item("d", folder: true)], by: .size)
+        XCTAssertEqual(groups.map(\.title), ["Gigantic (> 4 GB)", "Tiny (0 – 16 KB)", "Empty (0 KB)", "Unspecified"])
+    }
+
+    func testDateBucketsNewestFirst() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC")!
+        let now = calendar.date(from: DateComponents(year: 2026, month: 11, day: 27, hour: 12))!  // a Friday
+        let day: (Int) -> Date = { calendar.date(byAdding: .day, value: -$0, to: now)! }
+        let items = [item("old", modified: day(400)), item("today", modified: day(0)), item("yesterday", modified: day(1)), item("none")]
+        let groups = FileGrouping.groups(items, by: .dateModified, now: now, calendar: calendar)
+        XCTAssertEqual(groups.map(\.title), ["Today", "Yesterday", "A long time ago", "Unspecified"])
+    }
+
+    func testGroupsKeepSortOrderAndTypeGroupsPutFoldersFirst() {
+        let items = [item("b.txt", kind: "Text"), item("Docs", folder: true), item("a.txt", kind: "Text"), item("x.pdf", kind: "PDF")]
+        let groups = FileGrouping.groups(items, by: .type)
+        XCTAssertEqual(groups.map(\.title), ["File folder", "PDF", "Text"])
+        XCTAssertEqual(groups[2].items.map(\.name), ["b.txt", "a.txt"], "grouping doesn't re-sort")
+    }
+
+    func testOldViewSettingsStillDecode() {
+        XCTAssertEqual(FolderViewSettings(encoded: "details|name|1")?.groupBy, GroupKey.none)
+        let settings = FolderViewSettings(viewMode: .content, sort: SortOrder(key: .size, ascending: false), groupBy: .type)
+        XCTAssertEqual(FolderViewSettings(encoded: settings.encoded), settings)
+    }
+}
+
+final class NetworkLocationTests: XCTestCase {
+    func testServerAddresses() {
+        XCTAssertEqual(NetworkLocations.normalizedURL("\\\\nas\\Share\\Photos")?.absoluteString, "smb://nas/Share/Photos")
+        XCTAssertEqual(NetworkLocations.normalizedURL("nas.local/Share")?.absoluteString, "smb://nas.local/Share")
+        XCTAssertEqual(NetworkLocations.normalizedURL("afp://mac.local/Home")?.scheme, "afp")
+        XCTAssertEqual(NetworkLocations.normalizedURL("smb://nas/My Files")?.path, "/My Files")
+        XCTAssertNil(NetworkLocations.normalizedURL("  "))
+        XCTAssertNil(NetworkLocations.normalizedURL("gopher://old"))
+        XCTAssertTrue(NetworkLocations.isMountable(URL(string: "smb://nas/a")!))
+        XCTAssertFalse(NetworkLocations.isMountable(URL(string: "https://example.com")!))
+    }
+
+    func testDisplayName() {
+        XCTAssertEqual(NetworkLocation(address: "smb://nas/Share", reconnectAtLaunch: false).displayName, "Share (nas)")
+        XCTAssertEqual(NetworkLocation(address: "smb://nas", reconnectAtLaunch: false).displayName, "nas")
+    }
+}

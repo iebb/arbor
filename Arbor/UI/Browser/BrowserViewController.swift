@@ -202,8 +202,8 @@ final class BrowserViewController: NSViewController {
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
                 FileOperationService.shared.showAlert(
-                    message: "Arbor can't find “\(url.path)”.",
-                    info: "Check the spelling and try again.",
+                    message: String(localized: "Arbor can't find “\(url.path)”."),
+                    info: String(localized: "Check the spelling and try again."),
                     window: view.window
                 )
                 return
@@ -353,6 +353,7 @@ final class BrowserViewController: NSViewController {
             isSearch: location.isSearch,
             viewMode: viewSettings.viewMode,
             sort: viewSettings.sort,
+            groupBy: viewSettings.groupBy,
             display: .current
         )
     }
@@ -411,7 +412,7 @@ final class BrowserViewController: NSViewController {
         applyItems()
         let nsError = error as NSError
         if nsError.domain == NSCocoaErrorDomain, nsError.code == NSFileReadNoPermissionError {
-            contentHost.setMessage("You don't currently have permission to access this folder.\n\nTo open it, give Arbor access in System Settings › Privacy & Security › Files and Folders (or Full Disk Access).")
+            contentHost.setMessage(String(localized: "You don't currently have permission to access this folder.\n\nTo open it, give Arbor access in System Settings › Privacy & Security › Files and Folders (or Full Disk Access)."))
         } else {
             contentHost.setMessage(error.localizedDescription)
         }
@@ -448,7 +449,7 @@ final class BrowserViewController: NSViewController {
             contentHost.setMessage(items.isEmpty ? (isBusy ? "Searching…" : "No items match your search.") : nil)
         case .folder:
             if items.isEmpty {
-                if contentHost.message == nil { contentHost.setMessage("This folder is empty.") }
+                if contentHost.message == nil { contentHost.setMessage(String(localized: "This folder is empty.")) }
             } else {
                 contentHost.setMessage(nil)
             }
@@ -542,6 +543,12 @@ final class BrowserViewController: NSViewController {
         guard !location.isThisMac else { return }
         installPresenter()
         presenter?.show(items: items, context: presentationContext(), scrollToTop: false)
+    }
+
+    func setGroupBy(_ key: GroupKey) {
+        viewSettings.groupBy = key
+        FolderViewStore.shared.save(viewSettings, for: location)
+        applyItems()
     }
 
     func setSort(_ sort: SortOrder) {

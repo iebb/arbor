@@ -77,7 +77,7 @@ extension FileItem {
             size: (isDirectory || linked != nil) ? nil : values.fileSize.map(Int64.init),
             modified: values.contentModificationDate,
             created: values.creationDate,
-            kind: showsAsFolder ? "File folder" : (values.localizedTypeDescription ?? "File"),
+            kind: showsAsFolder ? String(localized: "File folder") : (values.localizedTypeDescription ?? String(localized: "File")),
             contentType: values.contentType,
             linkedFolderURL: linked
         )

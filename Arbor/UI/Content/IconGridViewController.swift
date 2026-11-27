@@ -5,7 +5,28 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
     weak var delegate: ItemPresenterDelegate?
     let collectionView = ExplorerCollectionView()
     private let layout = NSCollectionViewFlowLayout()
+    /// All items in display order; groups are consecutive runs of it.
     private var items: [FileItem] = []
+    private var sectionTitles: [String] = [""]
+    private var sectionStarts: [Int] = [0]
+    private var lastContentWidth: CGFloat = 0
+
+    private func path(_ flat: Int) -> IndexPath {
+        let section = (sectionStarts.lastIndex { $0 <= flat }) ?? 0
+        return IndexPath(item: flat - sectionStarts[section], section: section)
+    }
+
+    private func flat(_ path: IndexPath) -> Int {
+        (sectionStarts.indices.contains(path.section) ? sectionStarts[path.section] : 0) + path.item
+    }
+
+    private func sectionCount(_ section: Int) -> Int {
+        guard sectionStarts.indices.contains(section) else { return 0 }
+        let end = section + 1 < sectionStarts.count ? sectionStarts[section + 1] : items.count
+        return end - sectionStarts[section]
+    }
+
+    private var isGrouped: Bool { context.groupBy != .none }
     private var context = PresentationContext(showExtensions: false, cutPaths: [], isSearch: false, viewMode: .largeIcons, sort: SortOrder())
     private(set) var mode: ViewMode = .largeIcons
     private var renamingURL: URL?
@@ -31,6 +52,7 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         case .list: return Metrics(iconSize: 16, itemSize: NSSize(width: 240, height: 22), style: .row, horizontal: true)
         case .tiles: return Metrics(iconSize: 48, itemSize: NSSize(width: 280, height: 64), style: .tile, horizontal: false)
         case .details: return Metrics(iconSize: 16, itemSize: NSSize(width: 220, height: 22), style: .row, horizontal: false)
+        case .content: return Metrics(iconSize: 32, itemSize: NSSize(width: 600, height: 56), style: .content, horizontal: false)
         }
     }
 
@@ -46,13 +68,14 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         collectionView.dataSource = self
         collectionView.delegate = self
         collectionView.register(IconItem.self, forItemWithIdentifier: IconItem.identifier)
+        collectionView.register(GridGroupHeader.self, forSupplementaryViewOfKind: NSCollectionView.elementKindSectionHeader, withIdentifier: GridGroupHeader.identifier)
         collectionView.registerForDraggedTypes([.fileURL])
         collectionView.setDraggingSourceOperationMask([.copy, .move, .generic, .link], forLocal: false)
         collectionView.setDraggingSourceOperationMask([.copy, .move, .generic, .link], forLocal: true)
         collectionView.onDoubleClick = { [weak self] indexPath in
-            guard let self, self.items.indices.contains(indexPath.item) else { return }
+            guard let self, self.items.indices.contains(self.flat(indexPath)) else { return }
             let selection = self.selectedItems
-            self.delegate?.presenter(self, open: selection.isEmpty ? [self.items[indexPath.item]] : selection)
+            self.delegate?.presenter(self, open: selection.isEmpty ? [self.items[self.flat(indexPath)]] : selection)
         }
         collectionView.menuProvider = { [weak self] in
             guard let self else { return nil }
@@ -61,10 +84,13 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         collectionView.typeSelectHandler = { [weak self] prefix in self?.typeSelect(prefix) }
         collectionView.isSingleClickMode = { [weak self] in self?.context.display.singleClickToOpen ?? false }
         collectionView.onSingleClickOpen = { [weak self] indexPath in
-            guard let self, self.items.indices.contains(indexPath.item) else { return }
-            self.delegate?.presenter(self, open: [self.items[indexPath.item]])
+            guard let self, self.items.indices.contains(self.flat(indexPath)) else { return }
+            self.delegate?.presenter(self, open: [self.items[self.flat(indexPath)]])
         }
-        collectionView.onHover = { [weak self] index in self?.hoverChanged(index) }
+        collectionView.onHover = { [weak self] path in
+            guard let self else { return }
+            self.hoverChanged(path.map(self.flat) ?? -1)
+        }
 
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
         scroll.documentView = collectionView
@@ -87,8 +113,24 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         layout.minimumInteritemSpacing = spacing
         layout.minimumLineSpacing = spacing
         layout.itemSize = metrics.itemSize
+        if mode == .content { layout.itemSize.width = contentRowWidth }
         layout.scrollDirection = metrics.horizontal ? .horizontal : .vertical
+        layout.headerReferenceSize = isGrouped && !metrics.horizontal ? NSSize(width: 0, height: 34) : .zero
         collectionView.reloadData()
+    }
+
+    /// Content rows span the view, like Explorer's Content layout.
+    private var contentRowWidth: CGFloat {
+        let width = (view as? NSScrollView)?.contentSize.width ?? view.bounds.width
+        return max(320, width - layout.sectionInset.left - layout.sectionInset.right)
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard mode == .content, abs(contentRowWidth - lastContentWidth) > 1 else { return }
+        lastContentWidth = contentRowWidth
+        layout.itemSize.width = contentRowWidth
+        layout.invalidateLayout()
     }
 
     // MARK: ItemPresenter
@@ -97,7 +139,7 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
 
     var selectedItems: [FileItem] {
         collectionView.selectionIndexPaths
-            .map(\.item)
+            .map { flat($0) }
             .sorted()
             .compactMap { items.indices.contains($0) ? items[$0] : nil }
     }
@@ -114,12 +156,23 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         }
         deferredShow = nil
         let previouslySelected = Set(selectedItems.map(\.url.pathKey))
-        items = newItems
+        let groups = FileGrouping.groups(newItems, by: newContext.groupBy)
+        // Sections are consecutive runs of `items`, so store the items in group order.
+        items = groups.flatMap(\.items)
+        sectionTitles = groups.isEmpty ? [""] : groups.map(\.title)
+        var starts: [Int] = []
+        var offset = 0
+        for group in groups {
+            starts.append(offset)
+            offset += group.items.count
+        }
+        sectionStarts = starts.isEmpty ? [0] : starts
+        let groupingChanged = context.groupBy != newContext.groupBy
         let compactChanged = context.display.compact != newContext.display.compact
         context = newContext
-        if compactChanged { apply(mode) }
+        if compactChanged || groupingChanged { apply(mode) }
         collectionView.reloadData()
-        let paths = items.indices.filter { previouslySelected.contains(items[$0].url.pathKey) }.map { IndexPath(item: $0, section: 0) }
+        let paths = items.indices.filter { previouslySelected.contains(items[$0].url.pathKey) }.map { path($0) }
         collectionView.selectionIndexPaths = Set(paths)
         if scrollToTop { collectionView.scroll(.zero) }
     }
@@ -128,7 +181,7 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         context = newContext
         guard renamingURL == nil else { return }
         for case let item as IconItem in collectionView.visibleItems() {
-            if let index = collectionView.indexPath(for: item)?.item, items.indices.contains(index) {
+            if let index = collectionView.indexPath(for: item).map(flat), items.indices.contains(index) {
                 configure(item, with: items[index])
             }
         }
@@ -141,16 +194,16 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         let old = hoveredIndex
         hoveredIndex = index
         for i in [old, index] where i >= 0 {
-            (collectionView.item(at: IndexPath(item: i, section: 0)) as? IconItem)?.itemView.isHovered = i == index
+            (collectionView.item(at: path(i)) as? IconItem)?.itemView.isHovered = i == index
         }
         guard context.display.singleClickToOpen, index >= 0, renamingURL == nil else { return pointToSelect.cancel() }
         pointToSelect.schedule { [weak self] in
             guard let self, self.hoveredIndex == index, self.renamingURL == nil, self.items.indices.contains(index) else { return }
-            let path = IndexPath(item: index, section: 0)
+            let target = self.path(index)
             if NSEvent.modifierFlags.contains(.command) {
-                self.collectionView.selectionIndexPaths.insert(path)
-            } else if self.collectionView.selectionIndexPaths != [path] {
-                self.collectionView.selectionIndexPaths = [path]
+                self.collectionView.selectionIndexPaths.insert(target)
+            } else if self.collectionView.selectionIndexPaths != [target] {
+                self.collectionView.selectionIndexPaths = [target]
             }
             self.delegate?.presenterSelectionDidChange(self)
         }
@@ -159,7 +212,7 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
     func select(_ urls: Set<URL>, scroll: Bool) {
         guard renamingURL == nil else { return }  // changing selection would end the edit
         let keys = pathKeys(urls)
-        let paths = Set(items.indices.filter { keys.contains(items[$0].url.pathKey) }.map { IndexPath(item: $0, section: 0) })
+        let paths = Set(items.indices.filter { keys.contains(items[$0].url.pathKey) }.map { path($0) })
         collectionView.selectionIndexPaths = paths
         if scroll, let first = paths.min() { collectionView.scrollToItems(at: [first], scrollPosition: .nearestHorizontalEdge) }
         delegate?.presenterSelectionDidChange(self)
@@ -176,16 +229,16 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
     }
 
     func invertSelection() {
-        let all = Set(items.indices.map { IndexPath(item: $0, section: 0) })
+        let all = Set(items.indices.map { path($0) })
         collectionView.selectionIndexPaths = all.subtracting(collectionView.selectionIndexPaths)
         delegate?.presenterSelectionDidChange(self)
     }
 
     func selectEdge(last: Bool) {
         guard !items.isEmpty else { return }
-        let path = IndexPath(item: last ? items.count - 1 : 0, section: 0)
-        collectionView.selectionIndexPaths = [path]
-        collectionView.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge)
+        let target = path(last ? items.count - 1 : 0)
+        collectionView.selectionIndexPaths = [target]
+        collectionView.scrollToItems(at: [target], scrollPosition: .nearestHorizontalEdge)
         delegate?.presenterSelectionDidChange(self)
     }
 
@@ -203,11 +256,11 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
 
     func beginRename(_ url: URL) {
         guard let index = items.firstIndex(where: { $0.url.isSameItem(as: url) }) else { return }
-        let path = IndexPath(item: index, section: 0)
-        collectionView.selectionIndexPaths = [path]
-        collectionView.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge)
+        let target = path(index)
+        collectionView.selectionIndexPaths = [target]
+        collectionView.scrollToItems(at: [target], scrollPosition: .nearestHorizontalEdge)
         collectionView.layoutSubtreeIfNeeded()
-        guard let item = collectionView.item(at: path) as? IconItem else { return }
+        guard let item = collectionView.item(at: target) as? IconItem else { return }
         let field = item.itemView.titleField
         renamingURL = items[index].url
         renameCancelled = false
@@ -259,12 +312,22 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
 
     // MARK: Data source
 
-    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int { items.count }
+    func numberOfSections(in collectionView: NSCollectionView) -> Int { sectionTitles.count }
+
+    func collectionView(_ collectionView: NSCollectionView, numberOfItemsInSection section: Int) -> Int { sectionCount(section) }
+
+    func collectionView(_ collectionView: NSCollectionView, viewForSupplementaryElementOfKind kind: NSCollectionView.SupplementaryElementKind, at indexPath: IndexPath) -> NSView {
+        let header = collectionView.makeSupplementaryView(ofKind: kind, withIdentifier: GridGroupHeader.identifier, for: indexPath)
+        if let header = header as? GridGroupHeader, sectionTitles.indices.contains(indexPath.section) {
+            header.set(title: sectionTitles[indexPath.section], count: sectionCount(indexPath.section))
+        }
+        return header
+    }
 
     func collectionView(_ collectionView: NSCollectionView, itemForRepresentedObjectAt indexPath: IndexPath) -> NSCollectionViewItem {
         let item = collectionView.makeItem(withIdentifier: IconItem.identifier, for: indexPath)
-        if let iconItem = item as? IconItem, items.indices.contains(indexPath.item) {
-            configure(iconItem, with: items[indexPath.item])
+        if let iconItem = item as? IconItem, items.indices.contains(flat(indexPath)) {
+            configure(iconItem, with: items[flat(indexPath)])
         }
         return item
     }
@@ -279,13 +342,18 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         view.display = display
         view.title = file.displayName(showExtensions: context.showExtensions)
         view.detailField.stringValue = file.kind
-        view.secondDetailField.stringValue = file.isFolder ? "" : Format.bytes(file.size ?? 0)
+        if metrics.style == .content {
+            view.secondDetailField.stringValue = file.isFolder ? "" : String(localized: "Size: \(Format.bytes(file.size ?? 0))")
+            view.dateField.stringValue = String(localized: "Date modified: \(Format.date(file.modified))")
+        } else {
+            view.secondDetailField.stringValue = file.isFolder ? "" : Format.bytes(file.size ?? 0)
+        }
         view.alphaValue = context.isDimmed(file) ? 0.5 : 1
         view.imageView.image = IconCache.icon(for: file.url)
         view.badgeView.image = nil
         view.toolTipSource.provider = display.popUpDescriptions ? { display.toolTip(for: file) } : nil
         view.toolTipSource.install(on: view)
-        view.isHovered = collectionView.indexPath(for: item)?.item == hoveredIndex
+        view.isHovered = collectionView.indexPath(for: item).map(flat) == hoveredIndex
         item.onToggle = { [weak self, weak item] in
             guard let self, let item, let path = self.collectionView.indexPath(for: item) else { return }
             if self.collectionView.selectionIndexPaths.contains(path) {
@@ -329,12 +397,12 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
     }
 
     func collectionView(_ collectionView: NSCollectionView, pasteboardWriterForItemAt indexPath: IndexPath) -> NSPasteboardWriting? {
-        items.indices.contains(indexPath.item) ? items[indexPath.item].url as NSURL : nil
+        items.indices.contains(flat(indexPath)) ? items[flat(indexPath)].url as NSURL : nil
     }
 
     private func dropTarget(_ indexPath: IndexPath, _ operation: NSCollectionView.DropOperation) -> FileItem? {
-        guard operation == .on, items.indices.contains(indexPath.item), items[indexPath.item].isFolder else { return nil }
-        return items[indexPath.item]
+        guard operation == .on, items.indices.contains(flat(indexPath)), items[flat(indexPath)].isFolder else { return nil }
+        return items[flat(indexPath)]
     }
 
     func collectionView(
@@ -359,7 +427,7 @@ final class ExplorerCollectionView: NSCollectionView {
     var menuProvider: (() -> NSMenu?)?
     var typeSelectHandler: ((String) -> Void)?
     var onSingleClickOpen: ((IndexPath) -> Void)?
-    var onHover: ((Int) -> Void)?
+    var onHover: ((IndexPath?) -> Void)?
     var isSingleClickMode: () -> Bool = { false }
     private var typed = ""
     private var lastTyped = Date.distantPast
@@ -389,12 +457,12 @@ final class ExplorerCollectionView: NSCollectionView {
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        onHover?(indexPathForItem(at: convert(event.locationInWindow, from: nil))?.item ?? -1)
+        onHover?(indexPathForItem(at: convert(event.locationInWindow, from: nil)))
     }
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
-        onHover?(-1)
+        onHover?(nil)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -460,7 +528,7 @@ final class IconItem: NSCollectionViewItem {
 
 /// One icon cell. Lays itself out as a grid icon, a single row, or a tile.
 final class IconItemView: NSView {
-    enum Style { case grid, row, tile }
+    enum Style { case grid, row, tile, content }
 
     var style: Style = .grid { didSet { applyStyle(); needsLayout = true } }
     var iconSize: CGFloat = 96 { didSet { needsLayout = true } }
@@ -480,6 +548,8 @@ final class IconItemView: NSView {
     let titleField = NSTextField(wrappingLabelWithString: "")
     let detailField = NSTextField.label("", size: 11, color: .secondaryLabelColor)
     let secondDetailField = NSTextField.label("", size: 11, color: .secondaryLabelColor)
+    let dateField = NSTextField.label("", size: 11, color: .secondaryLabelColor)
+    private let separator = NSBox()
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -487,7 +557,8 @@ final class IconItemView: NSView {
         titleField.font = .systemFont(ofSize: 12)
         titleField.isSelectable = false
         titleField.cell?.truncatesLastVisibleLine = true
-        for view in [imageView, badgeView, titleField, detailField, secondDetailField, checkBox] {
+        separator.boxType = .separator
+        for view in [imageView, badgeView, titleField, detailField, secondDetailField, dateField, separator, checkBox] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
@@ -522,13 +593,15 @@ final class IconItemView: NSView {
             titleField.alignment = .center
             titleField.maximumNumberOfLines = 2
             titleField.lineBreakMode = .byWordWrapping
-        case .row, .tile:
+        case .row, .tile, .content:
             titleField.alignment = .left
             titleField.maximumNumberOfLines = 1
             titleField.lineBreakMode = .byTruncatingTail
         }
-        detailField.isHidden = style != .tile
-        secondDetailField.isHidden = style != .tile
+        detailField.isHidden = style != .tile && style != .content
+        secondDetailField.isHidden = style != .tile && style != .content
+        dateField.isHidden = style != .content
+        separator.isHidden = style != .content
     }
 
     func setEditing(_ editing: Bool) {
@@ -568,6 +641,17 @@ final class IconItemView: NSView {
             titleField.frame = NSRect(x: x, y: b.height / 2 + 6, width: width, height: 17)
             detailField.frame = NSRect(x: x, y: b.height / 2 - 10, width: width, height: 15)
             secondDetailField.frame = NSRect(x: x, y: b.height / 2 - 25, width: width, height: 15)
+        case .content:
+            // Icon, then name over type on the left; date and size in a column on the right.
+            imageView.frame = NSRect(x: 8 + boxColumn, y: (b.height - iconSize) / 2, width: iconSize, height: iconSize)
+            let x = iconSize + 18 + boxColumn
+            let right: CGFloat = min(240, b.width * 0.4)
+            let width = b.width - x - right - 12
+            titleField.frame = NSRect(x: x, y: b.height / 2 + 2, width: width, height: 17)
+            detailField.frame = NSRect(x: x, y: b.height / 2 - 16, width: width, height: 15)
+            dateField.frame = NSRect(x: b.width - right, y: b.height / 2 + 2, width: right - 8, height: 15)
+            secondDetailField.frame = NSRect(x: b.width - right, y: b.height / 2 - 16, width: right - 8, height: 15)
+            separator.frame = NSRect(x: 4, y: 0, width: b.width - 8, height: 1)
         }
     }
 
@@ -582,5 +666,33 @@ final class IconItemView: NSView {
             border.lineWidth = 1
             border.stroke()
         }
+    }
+}
+
+/// A group header in the icon layouts: "Today (3)" followed by a hairline.
+final class GridGroupHeader: NSView, NSCollectionViewElement {
+    static let identifier = NSUserInterfaceItemIdentifier("GridGroupHeader")
+    private let label = NSTextField.label("", size: 12.5, weight: .semibold, color: .controlAccentColor)
+    private let line = NSBox()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        line.boxType = .separator
+        line.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        addSubview(line)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6),
+            line.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 8),
+            line.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            line.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func set(title: String, count: Int) {
+        label.stringValue = "\(title) (\(count))"
     }
 }

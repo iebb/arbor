@@ -29,7 +29,7 @@ final class ProgressWindowController: NSWindowController {
         bar.maxValue = Double(max(progress?.total ?? 1, 1))
         bar.style = .bar
 
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelPressed))
+        let cancel = NSButton(title: String(localized: "Cancel"), target: self, action: #selector(cancelPressed))
         cancel.translatesAutoresizingMaskIntoConstraints = false
         cancel.keyEquivalent = "\u{1b}"
         cancel.isHidden = progress == nil
@@ -83,7 +83,7 @@ final class ProgressWindowController: NSWindowController {
 
     @objc private func cancelPressed() {
         progress?.cancel()
-        detailLabel.stringValue = "Cancelling…"
+        detailLabel.stringValue = String(localized: "Cancelling…")
     }
 
     func finish() {

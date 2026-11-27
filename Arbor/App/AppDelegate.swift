@@ -27,6 +27,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installKeyMonitor()
+        GlobalHotKey.shared.onPress = { [weak self] in
+            NSApp.activate()
+            self?.openWindow(Preferences.shared.startLocation.location)
+        }
+        GlobalHotKey.shared.apply(Preferences.shared.hotKey)
+        NotificationCenter.default.addObserver(forName: .arborPreferencesChanged, object: nil, queue: .main) { _ in
+            GlobalHotKey.shared.apply(Preferences.shared.hotKey)
+        }
+        NetworkLocations.reconnectSaved()
         let workspace = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification, NSWorkspace.didRenameVolumeNotification] {
             workspace.addObserver(forName: name, object: nil, queue: .main) { _ in

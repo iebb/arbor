@@ -25,8 +25,9 @@ Finder, and dark mode.
   Expands to the open folder; drop files on any folder.
 - **Status bar** — item count, selection count and size, Details / Large icons toggles.
 
-**Views** — Extra large, Large, Medium and Small icons, List, **Details** and Tiles
-(⌃⇧1…7, as in Explorer). Photos, videos and PDFs get thumbnails. Every folder remembers its own
+**Views** — Extra large, Large, Medium and Small icons, List, **Details**, Tiles and **Content**
+(⌃⇧1…8, as in Explorer). **Group by** Name, Date modified, Type or Size, with Explorer's groups
+("Today", "Last week", "Tiny (0 – 16 KB)"…). Photos, videos and PDFs get thumbnails. Every folder remembers its own
 layout and sort order. **This Mac** page with your folders and drives, with free-space bars.
 **Preview pane** (⌥P) powered by Quick Look.
 
@@ -38,7 +39,8 @@ header to show or hide columns; drag to reorder and resize. Natural sort ("file2
 - Cut / Copy / Paste through the system clipboard (Finder can paste Arbor's copies and vice versa).
   Cut items are dimmed until pasted.
 - Paste into the same folder makes `name - Copy.ext`, `name - Copy (2).ext`.
-- Name conflicts ask **Replace / Skip / Keep both**, with "Do this for all".
+- Name conflicts ask **Replace / Skip / Keep both**, with "Do this for all". A folder that already
+  exists can be **merged**: everything is kept and you're only asked about files that clash.
 - Drag and drop: same drive moves, other drive copies; ⌥ forces copy, ⌘ forces move.
 - **New folder** / **New text document** start an inline rename, like Explorer.
 - **Rename** with F2 or a slow second click; only the name is selected, not the extension. Select
@@ -49,6 +51,15 @@ header to show or hide columns; drag to reorder and resize. Natural sort ("file2
 - Progress window with Cancel for long operations.
 - Compress to ZIP, Extract All, Copy as path, Open with ▸, Share ▸, Open in Terminal, Show in Finder,
   Pin to Quick access, Eject, **Properties** (size on disk, contents, dates, Read-only and Hidden).
+
+**Network** — Connect to Server (⌘K) and Map network drive for SMB, AFP, NFS, WebDAV and FTP. Type
+`\\server\share` or `smb://server/share` in the address bar. Mapped servers appear under Network
+locations on This Mac and can reconnect when Arbor starts.
+
+**Open from anywhere** — an optional system-wide shortcut (⌥⌘E and others) that opens a new Arbor
+window from any app, like Win+E, plus Open at login.
+
+**Languages** — English and Japanese (日本語), using Windows Explorer's Japanese terms.
 
 **Folder Options** (⌘, or ⋯ › Options) — a copy of Explorer's dialog, with OK / Cancel / Apply and
 Restore Defaults on each tab:
@@ -93,7 +104,9 @@ usually ⌘+key).
 | Properties | Alt+Enter | ⌘I |
 | Preview pane | Alt+P | ⌥⌘P |
 | Quick Look | | Space, ⌘Y |
-| Layouts | Ctrl+Shift+1…7 | ⌃⇧1…7 |
+| Layouts | Ctrl+Shift+1…8 | ⌃⇧1…8 |
+| Connect to Server | | ⌘K |
+| New window from any app | Win+E | optional, e.g. ⌥⌘E |
 | First / last item | Home / End | |
 | New window / tab | | ⌘N / ⌘T |
 | Close tab | | ⌘W |
@@ -156,9 +169,8 @@ Design notes:
 
 ## Roadmap
 
-Ideas for later: merging folders on conflict (Explorer's folder merge), a "Content" layout and
-grouping, a global hotkey like Win+E, network locations, Spotlight-backed search, and signed,
-notarized releases with automatic updates.
+Ideas for later: Spotlight-backed search, collapsible groups, more languages, and signed, notarized
+releases with automatic updates.
 
 ## License
 

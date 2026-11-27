@@ -7,6 +7,7 @@ struct PresentationContext {
     var isSearch: Bool
     var viewMode: ViewMode
     var sort: SortOrder
+    var groupBy: GroupKey = .none
     var display = DisplayOptions()
 
     func isDimmed(_ item: FileItem) -> Bool {
@@ -58,22 +59,22 @@ struct DisplayOptions: Equatable {
 enum ItemToolTip {
     static func text(for item: FileItem, includeFolderSize: Bool) -> String {
         guard let folder = item.folderURL else {
-            return "Type: \(item.kind)\nSize: \(Format.bytes(item.size ?? 0))\nDate modified: \(Format.date(item.modified))"
+            return [String(localized: "Type: \(item.kind)"), String(localized: "Size: \(Format.bytes(item.size ?? 0))"), String(localized: "Date modified: \(Format.date(item.modified))")].joined(separator: "\n")
         }
-        var lines = ["Date created: \(Format.date(item.created))"]
+        var lines = [String(localized: "Date created: \(Format.date(item.created))")]
         if includeFolderSize, let size = folderSize(folder) {
-            lines.append("Size: \(size.complete ? "" : "more than ")\(Format.bytes(size.bytes))")
+            lines.append(size.complete ? String(localized: "Size: \(Format.bytes(size.bytes))") : String(localized: "Size: more than \(Format.bytes(size.bytes))"))
         }
         let children = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? [])
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
         if children.isEmpty {
-            lines.append("Empty folder")
+            lines.append(String(localized: "Empty folder"))
         } else {
             let isDir: (URL) -> Bool = { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
             let folders = children.filter(isDir).map(\.lastPathComponent)
             let files = children.filter { !isDir($0) }.map(\.lastPathComponent)
-            if !folders.isEmpty { lines.append("Folders: " + summary(folders)) }
-            if !files.isEmpty { lines.append("Files: " + summary(files)) }
+            if !folders.isEmpty { lines.append(String(localized: "Folders: \(summary(folders))")) }
+            if !files.isEmpty { lines.append(String(localized: "Files: \(summary(files))")) }
         }
         return lines.joined(separator: "\n")
     }

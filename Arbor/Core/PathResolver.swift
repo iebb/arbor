@@ -25,12 +25,12 @@ enum PathResolver {
         guard !text.isEmpty else { return .notFound(input) }
 
         let lowered = text.lowercased()
-        if ["this mac", "this pc", "computer"].contains(lowered) { return .location(.thisMac) }
+        if ["this mac", "this pc", "computer", String(localized: "This Mac").lowercased()].contains(lowered) { return .location(.thisMac) }
 
         if let url = URL(string: text), let scheme = url.scheme?.lowercased(), scheme.count > 1 {
             if scheme == "file" {
                 text = url.path
-            } else if ["http", "https", "ftp", "smb", "afp", "mailto"].contains(scheme) {
+            } else if ["http", "https", "ftp", "smb", "cifs", "afp", "nfs", "webdav", "vnc", "mailto"].contains(scheme) {
                 return .web(url)
             }
         }

@@ -8,9 +8,13 @@ import UniformTypeIdentifiers
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var draft: [FolderOption: Bool] = [:]
     private var draftStart: StartLocation = .home
+    private var draftHotKey: HotKeyChoice = .off
+    private var draftLoginItem = false
+    private let hotKeyPopup = NSPopUpButton()
+    private let loginBox = NSButton(checkboxWithTitle: String(localized: "Open Arbor at login"), target: nil, action: nil)
     private var refreshers: [() -> Void] = []
     private let startPopup = NSPopUpButton()
-    private let applyButton = NSButton(title: "Apply", target: nil, action: nil)
+    private let applyButton = NSButton(title: String(localized: "Apply"), target: nil, action: nil)
     private let tabView = NSTabView()
     private let defaultStatus = NSTextField.label("", size: 11, color: .secondaryLabelColor)
 
@@ -21,7 +25,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Folder Options"
+        window.title = String(localized: "Folder Options")
         window.isReleasedWhenClosed = false
         super.init(window: window)
         window.delegate = self
@@ -41,6 +45,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func loadDraft() {
         draft = Dictionary(uniqueKeysWithValues: FolderOption.allCases.map { ($0, Preferences.shared[$0]) })
         draftStart = Preferences.shared.startLocation
+        draftHotKey = Preferences.shared.hotKey
+        draftLoginItem = LoginItem.isEnabled
         refreshAll()
     }
 
@@ -52,32 +58,35 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private var isDirty: Bool {
-        draftStart != Preferences.shared.startLocation || draft.contains { Preferences.shared[$0.key] != $0.value }
+        draftStart != Preferences.shared.startLocation || draftHotKey != Preferences.shared.hotKey
+            || draftLoginItem != LoginItem.isEnabled || draft.contains { Preferences.shared[$0.key] != $0.value }
     }
 
     private func refreshAll() {
         refreshers.forEach { $0() }
         if let index = StartLocation.available.firstIndex(of: draftStart) { startPopup.selectItem(at: index) }
+        hotKeyPopup.selectItem(at: HotKeyChoice.allCases.firstIndex(of: draftHotKey) ?? 0)
+        loginBox.state = draftLoginItem ? .on : .off
         applyButton.isEnabled = isDirty
         let handler = NSWorkspace.shared.urlForApplication(toOpen: .folder)
         let name = handler.map { FileManager.default.displayName(atPath: $0.path) } ?? "Finder"
-        defaultStatus.stringValue = "Folders opened from other apps currently open in \(name)."
+        defaultStatus.stringValue = String(localized: "Folders opened from other apps currently open in \(name).")
     }
 
     // MARK: Layout
 
     private func build() {
         tabView.translatesAutoresizingMaskIntoConstraints = false
-        for (title, content) in [("General", generalTab()), ("View", viewTab()), ("Search", searchTab())] {
+        for (title, content) in [(String(localized: "General"), generalTab()), (String(localized: "View"), viewTab()), (String(localized: "Search"), searchTab())] {
             let item = NSTabViewItem(identifier: title)
             item.label = title
             item.view = content
             tabView.addTabViewItem(item)
         }
 
-        let ok = NSButton(title: "OK", target: self, action: #selector(okPressed))
+        let ok = NSButton(title: String(localized: "OK"), target: self, action: #selector(okPressed))
         ok.keyEquivalent = "\r"
-        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelPressed))
+        let cancel = NSButton(title: String(localized: "Cancel"), target: self, action: #selector(cancelPressed))
         cancel.keyEquivalent = "\u{1b}"
         applyButton.target = self
         applyButton.action = #selector(applyPressed)
@@ -99,7 +108,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             buttons.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -18),
             buttons.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16),
             content.widthAnchor.constraint(equalToConstant: 480),
-            content.heightAnchor.constraint(equalToConstant: 620),
+            content.heightAnchor.constraint(equalToConstant: 740),
         ])
         window?.contentView = content
     }
@@ -111,7 +120,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         stack.alignment = .leading
         stack.spacing = 12
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let restoreButton = NSButton(title: "Restore Defaults", target: self, action: restore)
+        let restoreButton = NSButton(title: String(localized: "Restore Defaults"), target: self, action: restore)
         restoreButton.translatesAutoresizingMaskIntoConstraints = false
         let view = NSView()
         view.addSubview(stack)
@@ -227,95 +236,118 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         for location in StartLocation.available { startPopup.addItem(withTitle: location.title) }
         startPopup.target = self
         startPopup.action = #selector(startChanged)
-        let startRow = NSStackView(views: [NSTextField.label("Open Arbor to:"), startPopup])
+        let startRow = NSStackView(views: [NSTextField.label(String(localized: "Open Arbor to:")), startPopup])
         startRow.spacing = 8
 
-        let singleClick: () -> Bool = { [weak self] in self?.value(.singleClickToOpen) ?? false }
-        let browse = group("Browse folders", symbol: "macwindow.on.rectangle", [
-            radio("Open each folder in the same window", .openFoldersInNewWindow, is: false),
-            radio("Open each folder in its own window", .openFoldersInNewWindow, is: true),
-        ])
-        let click = group("Click items as follows", symbol: "cursorarrow.click", [
-            radio("Single-click to open an item (point to select)", .singleClickToOpen, is: true),
-            indented(radio("Always underline icon titles", .underlineOnlyOnHover, is: false, enabledWhen: singleClick)),
-            indented(radio("Underline icon titles only when I point at them", .underlineOnlyOnHover, is: true, enabledWhen: singleClick)),
-            radio("Double-click to open an item (single-click to select)", .singleClickToOpen, is: false),
+        for choice in HotKeyChoice.allCases { hotKeyPopup.addItem(withTitle: choice.title) }
+        hotKeyPopup.target = self
+        hotKeyPopup.action = #selector(hotKeyChanged)
+        loginBox.target = self
+        loginBox.action = #selector(loginChanged)
+        let hotKeyRow = NSStackView(views: [NSTextField.label(String(localized: "Open a window from any app:")), hotKeyPopup])
+        hotKeyRow.spacing = 8
+        let launch = group(String(localized: "Open from anywhere"), symbol: "keyboard", [
+            hotKeyRow,
+            loginBox,
+            note(String(localized: "Like Win+E on Windows. The shortcut works while Arbor is running, so turn on Open Arbor at login too.")),
         ])
 
-        let clearButton = NSButton(title: "Clear", target: self, action: #selector(clearHistory))
-        let clearRow = NSStackView(views: [NSTextField.label("Clear Arbor history"), clearButton])
+        let singleClick: () -> Bool = { [weak self] in self?.value(.singleClickToOpen) ?? false }
+        let browse = group(String(localized: "Browse folders"), symbol: "macwindow.on.rectangle", [
+            radio(String(localized: "Open each folder in the same window"), .openFoldersInNewWindow, is: false),
+            radio(String(localized: "Open each folder in its own window"), .openFoldersInNewWindow, is: true),
+        ])
+        let click = group(String(localized: "Click items as follows"), symbol: "cursorarrow.click", [
+            radio(String(localized: "Single-click to open an item (point to select)"), .singleClickToOpen, is: true),
+            indented(radio(String(localized: "Always underline icon titles"), .underlineOnlyOnHover, is: false, enabledWhen: singleClick)),
+            indented(radio(String(localized: "Underline icon titles only when I point at them"), .underlineOnlyOnHover, is: true, enabledWhen: singleClick)),
+            radio(String(localized: "Double-click to open an item (single-click to select)"), .singleClickToOpen, is: false),
+        ])
+
+        let clearButton = NSButton(title: String(localized: "Clear"), target: self, action: #selector(clearHistory))
+        let clearRow = NSStackView(views: [NSTextField.label(String(localized: "Clear Arbor history")), clearButton])
         clearRow.spacing = 12
-        let privacy = group("Privacy", symbol: "hand.raised", [
-            check("Show recently used files (in Go › Recent Files)", .showRecentFiles),
-            check("Show frequently used folders (in the navigation pane)", .showFrequentFolders),
+        let privacy = group(String(localized: "Privacy"), symbol: "hand.raised", [
+            check(String(localized: "Show recently used files (in Go › Recent Files)"), .showRecentFiles),
+            check(String(localized: "Show frequently used folders (in the navigation pane)"), .showFrequentFolders),
             clearRow,
         ])
 
-        let makeDefault = NSButton(title: "Use Arbor to Open Folders", target: self, action: #selector(makeDefault))
-        let restoreFinder = NSButton(title: "Restore Finder", target: self, action: #selector(restoreFinder))
+        let makeDefault = NSButton(title: String(localized: "Use Arbor to Open Folders"), target: self, action: #selector(makeDefault))
+        let restoreFinder = NSButton(title: String(localized: "Restore Finder"), target: self, action: #selector(restoreFinder))
         let defaultButtons = NSStackView(views: [makeDefault, restoreFinder])
-        let viewer = group("Default folder viewer", symbol: "folder", [defaultButtons, defaultStatus])
+        let viewer = group(String(localized: "Default folder viewer"), symbol: "folder", [defaultButtons, defaultStatus])
 
-        return page([startRow, browse, click, privacy, viewer], restore: #selector(restoreGeneral))
+        return page([startRow, launch, browse, click, privacy, viewer], restore: #selector(restoreGeneral))
     }
 
     // MARK: View
 
     private func viewTab() -> NSView {
-        let applyFolders = NSButton(title: "Apply to Folders", target: self, action: #selector(applyToFolders))
-        let resetFolders = NSButton(title: "Reset Folders", target: self, action: #selector(resetFolders))
-        let folderViews = group("Folder views", symbol: "folder", [
-            note("You can apply this view (such as Details or Icons) to all folders."),
+        let applyFolders = NSButton(title: String(localized: "Apply to Folders"), target: self, action: #selector(applyToFolders))
+        let resetFolders = NSButton(title: String(localized: "Reset Folders"), target: self, action: #selector(resetFolders))
+        let folderViews = group(String(localized: "Folder views"), symbol: "folder", [
+            note(String(localized: "You can apply this view (such as Details or Icons) to all folders.")),
             NSStackView(views: [applyFolders, resetFolders]),
         ])
 
         let list = AdvancedSettingsList()
-        list.add(header: "Files and Folders", symbol: "folder.fill", level: 0)
-        list.add(check("Always show icons, never thumbnails", .alwaysShowIcons), level: 1)
-        list.add(check("Display file icon on thumbnails", .fileIconOnThumbnails), level: 1)
-        list.add(check("Display file size information in folder tips", .folderTipSize), level: 1)
-        list.add(check("Display the full path in the title bar", .fullPathInTitleBar), level: 1)
-        list.add(header: "Hidden files and folders", symbol: "folder", level: 1)
-        list.add(radio("Don't show hidden files, folders, or drives", .showHidden, is: false), level: 2)
-        list.add(radio("Show hidden files, folders, and drives", .showHidden, is: true), level: 2)
-        list.add(check("Hide empty drives", .hideEmptyDrives), level: 1)
-        list.add(check("Hide extensions for known file types", .showExtensions, inverted: true), level: 1)
-        list.add(check("Hide protected operating system files (Recommended)", .hideProtectedSystemFiles, confirm: { [weak self] checked in
+        list.add(header: String(localized: "Files and Folders"), symbol: "folder.fill", level: 0)
+        list.add(check(String(localized: "Always show icons, never thumbnails"), .alwaysShowIcons), level: 1)
+        list.add(check(String(localized: "Display file icon on thumbnails"), .fileIconOnThumbnails), level: 1)
+        list.add(check(String(localized: "Display file size information in folder tips"), .folderTipSize), level: 1)
+        list.add(check(String(localized: "Display the full path in the title bar"), .fullPathInTitleBar), level: 1)
+        list.add(header: String(localized: "Hidden files and folders"), symbol: "folder", level: 1)
+        list.add(radio(String(localized: "Don't show hidden files, folders, or drives"), .showHidden, is: false), level: 2)
+        list.add(radio(String(localized: "Show hidden files, folders, and drives"), .showHidden, is: true), level: 2)
+        list.add(check(String(localized: "Hide empty drives"), .hideEmptyDrives), level: 1)
+        list.add(check(String(localized: "Hide extensions for known file types"), .showExtensions, inverted: true), level: 1)
+        list.add(check(String(localized: "Hide protected operating system files (Recommended)"), .hideProtectedSystemFiles, confirm: { [weak self] checked in
             checked || self?.confirmShowProtectedFiles() == true
         }), level: 1)
-        list.add(check("Restore previous folder windows at launch", .restoreWindowsAtLaunch), level: 1)
-        list.add(check("Show pop-up description for folder and desktop items", .popUpDescriptions), level: 1)
-        list.add(check("Show preview handlers in preview pane", .previewHandlers), level: 1)
-        list.add(check("Show status bar", .showStatusBar), level: 1)
-        list.add(check("Use Backspace to go back (otherwise it deletes)", .backspaceGoesBack), level: 1)
-        list.add(check("Use check boxes to select items", .itemCheckBoxes), level: 1)
-        list.add(header: "When typing into list view", symbol: "folder", level: 1)
-        list.add(radio("Automatically type into the Search Box", .typeIntoSearchBox, is: true), level: 2)
-        list.add(radio("Select the typed item in the view", .typeIntoSearchBox, is: false), level: 2)
-        list.add(header: "Navigation pane", symbol: "sidebar.left", level: 0)
-        list.add(check("Expand to open folder", .expandToOpenFolder), level: 1)
-        list.add(check("Show This Mac", .showThisMac), level: 1)
-        list.heightAnchor.constraint(equalToConstant: 330).isActive = true
+        list.add(check(String(localized: "Restore previous folder windows at launch"), .restoreWindowsAtLaunch), level: 1)
+        list.add(check(String(localized: "Show pop-up description for folder and desktop items"), .popUpDescriptions), level: 1)
+        list.add(check(String(localized: "Show preview handlers in preview pane"), .previewHandlers), level: 1)
+        list.add(check(String(localized: "Show status bar"), .showStatusBar), level: 1)
+        list.add(check(String(localized: "Use Backspace to go back (otherwise it deletes)"), .backspaceGoesBack), level: 1)
+        list.add(check(String(localized: "Use check boxes to select items"), .itemCheckBoxes), level: 1)
+        list.add(header: String(localized: "When typing into list view"), symbol: "folder", level: 1)
+        list.add(radio(String(localized: "Automatically type into the Search Box"), .typeIntoSearchBox, is: true), level: 2)
+        list.add(radio(String(localized: "Select the typed item in the view"), .typeIntoSearchBox, is: false), level: 2)
+        list.add(header: String(localized: "Navigation pane"), symbol: "sidebar.left", level: 0)
+        list.add(check(String(localized: "Expand to open folder"), .expandToOpenFolder), level: 1)
+        list.add(check(String(localized: "Show This Mac"), .showThisMac), level: 1)
+        list.heightAnchor.constraint(equalToConstant: 450).isActive = true
 
-        let advancedLabel = NSTextField.label("Advanced settings:")
+        let advancedLabel = NSTextField.label(String(localized: "Advanced settings:"))
         return page([folderViews, advancedLabel, list], restore: #selector(restoreView))
     }
 
     // MARK: Search
 
     private func searchTab() -> NSView {
-        let how = group("How to search", symbol: "magnifyingglass", [
-            note("Arbor searches folders directly, so every folder is treated as a non-indexed location. Results appear as they're found."),
+        let how = group(String(localized: "How to search"), symbol: "magnifyingglass", [
+            note(String(localized: "Arbor searches folders directly, so every folder is treated as a non-indexed location. Results appear as they're found.")),
         ])
-        let nonIndexed = group("When searching non-indexed locations", symbol: "folder.badge.gearshape", [
-            check("Include system directories", .searchSystemDirectories),
-            check("Include compressed files (ZIP)", .searchCompressedFiles),
-            check("Always search file names and contents (this might take several minutes)", .searchFileContents),
+        let nonIndexed = group(String(localized: "When searching non-indexed locations"), symbol: "folder.badge.gearshape", [
+            check(String(localized: "Include system directories"), .searchSystemDirectories),
+            check(String(localized: "Include compressed files (ZIP)"), .searchCompressedFiles),
+            check(String(localized: "Always search file names and contents (this might take several minutes)"), .searchFileContents),
         ])
         return page([how, nonIndexed], restore: #selector(restoreSearch))
     }
 
     // MARK: Actions
+
+    @objc private func hotKeyChanged() {
+        draftHotKey = HotKeyChoice.allCases[max(0, hotKeyPopup.indexOfSelectedItem)]
+        refreshAll()
+    }
+
+    @objc private func loginChanged() {
+        draftLoginItem = loginBox.state == .on
+        refreshAll()
+    }
 
     @objc private func startChanged() {
         let choices = StartLocation.available
@@ -331,6 +363,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func restoreGeneral() {
         draftStart = .home
+        draftHotKey = .off
         restore(FolderOption.generalTab)
     }
 
@@ -339,6 +372,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func applyPressed() {
         Preferences.shared.apply(draft, startLocation: draftStart)
+        if draftHotKey != Preferences.shared.hotKey {
+            Preferences.shared.hotKey = draftHotKey
+            if !GlobalHotKey.shared.apply(draftHotKey) {
+                let alert = NSAlert()
+                alert.messageText = String(localized: "Another app is already using \(draftHotKey.title).")
+                alert.informativeText = String(localized: "Choose a different shortcut.")
+                alert.runModal()
+            }
+        }
+        if draftLoginItem != LoginItem.isEnabled, let problem = LoginItem.set(draftLoginItem) {
+            let alert = NSAlert()
+            alert.messageText = String(localized: "Arbor couldn't change Open at login.")
+            alert.informativeText = problem
+            alert.runModal()
+            draftLoginItem = LoginItem.isEnabled
+        }
         refreshAll()
     }
 
@@ -356,27 +405,27 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         alert.messageText = message
         alert.informativeText = info
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Yes")
-        alert.addButton(withTitle: "No")
+        alert.addButton(withTitle: String(localized: "Yes"))
+        alert.addButton(withTitle: String(localized: "No"))
         return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func confirmShowProtectedFiles() -> Bool {
         confirm(
-            "Warning",
-            info: "You have chosen to display protected operating system files (such as .DS_Store and the system folders at the top of your startup disk). macOS needs these files to run properly. Deleting or editing them can make your Mac unusable.\n\nAre you sure you want to display these files?"
+            String(localized: "Warning"),
+            info: String(localized: "You have chosen to display protected operating system files (such as .DS_Store and the system folders at the top of your startup disk). macOS needs these files to run properly. Deleting or editing them can make your Mac unusable.\n\nAre you sure you want to display these files?")
         )
     }
 
     @objc private func applyToFolders() {
         guard let browser = AppDelegate.shared.frontmostBrowser,
-              confirm("Folder Views", info: "Do you want all folders to match this folder's view settings?") else { return }
+              confirm(String(localized: "Folder Views"), info: String(localized: "Do you want all folders to match this folder's view settings?")) else { return }
         FolderViewStore.shared.applyToAllFolders(browser.viewSettings)
         NotificationCenter.default.post(name: .arborPreferencesChanged, object: nil)
     }
 
     @objc private func resetFolders() {
-        guard confirm("Folder Views", info: "Do you want to reset all folders to the default view settings?") else { return }
+        guard confirm(String(localized: "Folder Views"), info: String(localized: "Do you want to reset all folders to the default view settings?")) else { return }
         FolderViewStore.shared.reset()
         NotificationCenter.default.post(name: .arborPreferencesChanged, object: nil)
     }

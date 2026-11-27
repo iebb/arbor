@@ -47,11 +47,11 @@ enum NameGenerator {
 
     static func validate(_ name: String) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty { return "You must type a file name." }
+        if trimmed.isEmpty { return String(localized: "You must type a file name.") }
         if trimmed.rangeOfCharacter(from: invalidCharacters) != nil {
-            return "A file name can't contain any of the following characters: / :"
+            return String(localized: "A file name can't contain any of the following characters: / :")
         }
-        if trimmed == "." || trimmed == ".." { return "The specified file name is not valid." }
+        if trimmed == "." || trimmed == ".." { return String(localized: "The specified file name is not valid.") }
         return nil
     }
 }

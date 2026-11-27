@@ -12,9 +12,9 @@ final class PropertiesWindowController: NSWindowController, NSWindowDelegate {
     }
 
     private let urls: [URL]
-    private let sizeLabel = NSTextField.label("Calculating…")
-    private let diskSizeLabel = NSTextField.label("Calculating…")
-    private let containsLabel = NSTextField.label("Calculating…")
+    private let sizeLabel = NSTextField.label(String(localized: "Calculating…"))
+    private let diskSizeLabel = NSTextField.label(String(localized: "Calculating…"))
+    private let containsLabel = NSTextField.label(String(localized: "Calculating…"))
     private let cancelFlag = CancellationFlag()
 
     private init(urls: [URL]) {
@@ -50,9 +50,9 @@ final class PropertiesWindowController: NSWindowController, NSWindowDelegate {
         if let single {
             title = Location.displayName(of: single)
         } else {
-            title = "\(files) Files, \(folders) Folders"
+            title = String(localized: "\(files) Files, \(folders) Folders")
         }
-        window.title = "\(title) Properties"
+        window.title = String(localized: "\(title) Properties")
 
         let icon = NSImageView(image: single.map { IconCache.icon(for: $0) } ?? (NSImage(named: NSImage.multipleDocumentsName) ?? NSImage()))
         icon.imageScaling = .scaleProportionallyUpOrDown
@@ -80,31 +80,31 @@ final class PropertiesWindowController: NSWindowController, NSWindowDelegate {
         }
 
         if let single, let item = items.first {
-            row("Type of file", item.isFolder ? "File folder" : "\(item.kind)\(item.fileExtension.isEmpty ? "" : " (.\(item.fileExtension))")")
+            row(String(localized: "Type of file"), item.isFolder ? String(localized: "File folder") : "\(item.kind)\(item.fileExtension.isEmpty ? "" : " (.\(item.fileExtension))")")
             if !item.isFolder, let app = NSWorkspace.shared.urlForApplication(toOpen: single) {
-                row("Opens with", fm.displayName(atPath: app.path))
+                row(String(localized: "Opens with"), fm.displayName(atPath: app.path))
             }
         } else {
-            row("Type", files > 0 && folders > 0 ? "Multiple types" : (folders > 0 ? "All of type File folder" : "Multiple files"))
+            row(String(localized: "Type"), files > 0 && folders > 0 ? String(localized: "Multiple types") : (folders > 0 ? String(localized: "All of type File folder") : String(localized: "Multiple files")))
         }
         let parents = Set(urls.map { $0.parentFolder.path })
-        row("Location", parents.count == 1 ? parents.first! : "Various folders")
+        row(String(localized: "Location"), parents.count == 1 ? parents.first! : String(localized: "Various folders"))
         rows.append([NSView(), NSView()])
-        row("Size", sizeLabel)
-        row("Size on disk", diskSizeLabel)
-        if folders > 0 { row("Contains", containsLabel) }
+        row(String(localized: "Size"), sizeLabel)
+        row(String(localized: "Size on disk"), diskSizeLabel)
+        if folders > 0 { row(String(localized: "Contains"), containsLabel) }
 
         if let single {
             let values = try? single.resourceValues(forKeys: [.creationDateKey, .contentModificationDateKey, .contentAccessDateKey])
             rows.append([NSView(), NSView()])
-            row("Created", Format.longDate(values?.creationDate))
-            row("Modified", Format.longDate(values?.contentModificationDate))
-            row("Accessed", Format.longDate(values?.contentAccessDate))
+            row(String(localized: "Created"), Format.longDate(values?.creationDate))
+            row(String(localized: "Modified"), Format.longDate(values?.contentModificationDate))
+            row(String(localized: "Accessed"), Format.longDate(values?.contentAccessDate))
         }
 
         rows.append([NSView(), NSView()])
-        let locked = NSButton(checkboxWithTitle: "Read-only (Locked)", target: self, action: #selector(toggleLocked(_:)))
-        let hidden = NSButton(checkboxWithTitle: "Hidden", target: self, action: #selector(toggleHidden(_:)))
+        let locked = NSButton(checkboxWithTitle: String(localized: "Read-only (Locked)"), target: self, action: #selector(toggleLocked(_:)))
+        let hidden = NSButton(checkboxWithTitle: String(localized: "Hidden"), target: self, action: #selector(toggleHidden(_:)))
         let flags = urls.compactMap { try? $0.resourceValues(forKeys: [.isUserImmutableKey, .isHiddenKey]) }
         locked.state = state(flags.map { $0.isUserImmutable ?? false })
         hidden.state = state(flags.map { $0.isHidden ?? false })
@@ -113,7 +113,7 @@ final class PropertiesWindowController: NSWindowController, NSWindowDelegate {
         let attributes = NSStackView(views: [locked, hidden])
         attributes.orientation = .vertical
         attributes.alignment = .leading
-        row("Attributes", attributes)
+        row(String(localized: "Attributes"), attributes)
 
         let grid = NSGridView(views: rows)
         grid.column(at: 0).xPlacement = .trailing
@@ -124,7 +124,7 @@ final class PropertiesWindowController: NSWindowController, NSWindowDelegate {
             grid.row(at: index).height = 4
         }
 
-        let ok = NSButton(title: "OK", target: self, action: #selector(closeWindow))
+        let ok = NSButton(title: String(localized: "OK"), target: self, action: #selector(closeWindow))
         ok.keyEquivalent = "\r"
         let buttons = NSStackView(views: [ok])
 
@@ -205,7 +205,7 @@ final class PropertiesWindowController: NSWindowController, NSWindowDelegate {
     private func showSize(_ value: (Int64, Int64, Int, Int), done: Bool) {
         sizeLabel.stringValue = Format.bytesWithExact(value.0) + (done ? "" : "…")
         diskSizeLabel.stringValue = Format.bytesWithExact(value.1) + (done ? "" : "…")
-        containsLabel.stringValue = "\(Format.number(Int64(value.2))) Files, \(Format.number(Int64(value.3))) Folders"
+        containsLabel.stringValue = String(localized: "\(Format.number(Int64(value.2))) Files, \(Format.number(Int64(value.3))) Folders")
     }
 
     @objc private func toggleLocked(_ sender: NSButton) {

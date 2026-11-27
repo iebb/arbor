@@ -148,10 +148,10 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
         let fm = FileManager.default
         var nodes: [TreeNode] = []
         let home = fm.homeDirectoryForCurrentUser.normalizedFolder
-        nodes.append(TreeNode(kind: .home, url: home, title: "Home"))
+        nodes.append(TreeNode(kind: .home, url: home, title: String(localized: "Home")))
         let iCloud = home.appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
         if fm.fileExists(atPath: iCloud.path) {
-            nodes.append(TreeNode(kind: .iCloud, url: iCloud.normalizedFolder, title: "iCloud Drive"))
+            nodes.append(TreeNode(kind: .iCloud, url: iCloud.normalizedFolder, title: String(localized: "iCloud Drive")))
         }
         nodes.append(TreeNode(kind: .separator, url: nil, title: ""))
         for pin in Preferences.shared.pinnedFolders where fm.fileExists(atPath: pin.path) {
@@ -166,7 +166,7 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
         var thisMac: TreeNode?
         if Preferences.shared[.showThisMac] {
             nodes.append(TreeNode(kind: .separator, url: nil, title: ""))
-            let node = TreeNode(kind: .thisMac, url: nil, title: "This Mac")
+            let node = TreeNode(kind: .thisMac, url: nil, title: String(localized: "This Mac"))
             nodes.append(node)
             thisMac = node
         }

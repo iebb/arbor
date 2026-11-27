@@ -60,21 +60,32 @@ final class ThisMacViewController: NSViewController {
         let folderTiles = folders.filter { fm.fileExists(atPath: $0.path) }.map { url in
             TileView(url: url, title: Location.displayName(of: url), subtitle: nil, volume: nil)
         }
-        addSection("Folders (\(folderTiles.count))", tiles: folderTiles, tileSize: NSSize(width: Self.columnWidth, height: 58))
+        addSection(String(localized: "Folders (\(folderTiles.count))"), tiles: folderTiles, tileSize: NSSize(width: Self.columnWidth, height: 58))
 
         let volumes = VolumeService.visibleVolumes()
-        let driveTiles = volumes.map { volume in
+        func driveTile(_ volume: VolumeInfo) -> TileView {
             TileView(
                 url: volume.url,
                 title: volume.name,
-                subtitle: "\(Format.bytes(volume.availableCapacity)) free of \(Format.bytes(volume.totalCapacity))",
+                subtitle: String(localized: "\(Format.bytes(volume.availableCapacity)) free of \(Format.bytes(volume.totalCapacity))"),
                 volume: volume
             )
         }
-        addSection("Devices and drives (\(driveTiles.count))", tiles: driveTiles, tileSize: NSSize(width: Self.columnWidth, height: 68))
+        let driveTiles = volumes.filter { !$0.isNetwork }.map(driveTile)
+        addSection(String(localized: "Devices and drives (\(driveTiles.count))"), tiles: driveTiles, tileSize: NSSize(width: Self.columnWidth, height: 68))
 
-        if let selectedURL, !tiles.contains(where: { $0.url.isSameItem(as: selectedURL) }) { self.selectedURL = nil }
-        tiles.forEach { $0.isSelected = $0.url.isSameItem(as: selectedURL ?? URL(fileURLWithPath: "/nonexistent")) }
+        // Explorer's "Network locations": connected network volumes, plus mapped servers that aren't connected yet.
+        var networkTiles = volumes.filter(\.isNetwork).map(driveTile)
+        for location in NetworkLocations.saved {
+            guard let url = location.url, NetworkLocations.mountedURL(for: url) == nil else { continue }
+            networkTiles.append(TileView(url: url, title: location.displayName, subtitle: String(localized: "Disconnected"), volume: nil, icon: NSImage(named: NSImage.networkName)))
+        }
+        if !networkTiles.isEmpty {
+            addSection(String(localized: "Network locations (\(networkTiles.count))"), tiles: networkTiles, tileSize: NSSize(width: Self.columnWidth, height: 68))
+        }
+
+        if let selectedURL, !tiles.contains(where: { Self.same($0.url, selectedURL) }) { self.selectedURL = nil }
+        for tile in tiles { tile.isSelected = selectedURL.map { Self.same(tile.url, $0) } ?? false }
     }
 
     /// Both sections share one column width so folders and drives line up in the same columns.
@@ -114,9 +125,14 @@ final class ThisMacViewController: NSViewController {
         tiles += sectionTiles
     }
 
+    /// File URLs compare by path; server URLs (smb://…) by address.
+    static func same(_ a: URL, _ b: URL) -> Bool {
+        a.isFileURL && b.isFileURL ? a.isSameItem(as: b) : a.absoluteString == b.absoluteString
+    }
+
     func select(_ url: URL?) {
         selectedURL = url
-        for tile in tiles { tile.isSelected = url.map(tile.url.isSameItem(as:)) ?? false }
+        for tile in tiles { tile.isSelected = url.map { Self.same(tile.url, $0) } ?? false }
         delegate?.thisMacSelectionDidChange(self)
     }
 
@@ -179,11 +195,11 @@ final class TileView: NSView {
     var isSelected = false { didSet { needsDisplay = true } }
     private var isHovered = false { didSet { needsDisplay = true } }
 
-    init(url: URL, title: String, subtitle: String?, volume: VolumeInfo?) {
+    init(url: URL, title: String, subtitle: String?, volume: VolumeInfo?, icon customIcon: NSImage? = nil) {
         self.url = url
         self.volume = volume
         super.init(frame: .zero)
-        let icon = NSImageView(image: IconCache.icon(for: url))
+        let icon = NSImageView(image: customIcon ?? IconCache.icon(for: url))
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.translatesAutoresizingMaskIntoConstraints = false
         let titleLabel = NSTextField.label(title, size: 13)
@@ -197,8 +213,9 @@ final class TileView: NSView {
             titleLabel.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
         ]
-        if let volume {
-            let bar = CapacityBar(fraction: volume.usedFraction)
+        if volume != nil || subtitle != nil {
+            let bar = CapacityBar(fraction: volume?.usedFraction ?? 0)
+            bar.isHidden = volume == nil  // a disconnected server has no capacity to show
             let detail = NSTextField.label(subtitle ?? "", size: 11, color: .secondaryLabelColor)
             addSubview(bar)
             addSubview(detail)
@@ -216,7 +233,7 @@ final class TileView: NSView {
             constraints.append(titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor))
         }
         NSLayoutConstraint.activate(constraints)
-        if Preferences.shared[.popUpDescriptions] { toolTip = url.path }
+        if Preferences.shared[.popUpDescriptions] { toolTip = url.isFileURL ? url.path : url.absoluteString }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

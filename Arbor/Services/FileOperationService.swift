@@ -96,111 +96,61 @@ final class FileOperationService {
 
     // MARK: - Copy / move
 
-    enum ConflictChoice { case replace, skip, keepBoth, cancel }
-
-    /// Pastes or drops `sources` into `folder`. Calls back with the URLs of the new items.
+    /// Pastes or drops `sources` into `folder`. Calls back with the top-level items that resulted
+    /// (a merged folder counts as the folder it was merged into).
     func transfer(_ sources: [URL], to folder: URL, move: Bool, window: NSWindow?, completion: (([URL]) -> Void)? = nil) {
-        guard let ops = plan(sources: sources, into: folder, move: move, window: window), !ops.isEmpty else {
+        let planner = TransferPlanner(askAboutFile: askAboutFile, askAboutFolder: askAboutFolder)
+        let ops: [FileOp]
+        switch planner.plan(sources: sources, into: folder, move: move) {
+        case .success(let planned):
+            ops = planned
+        case .failure(.intoItself(let name)):
+            showAlert(
+                message: String(localized: "The destination folder is a subfolder of the source folder."),
+                info: move ? String(localized: "“\(name)” can't be moved into itself.") : String(localized: "“\(name)” can't be copied into itself."),
+                window: window
+            )
+            completion?([])
+            return
+        case .failure(.cancelled):
             completion?([])
             return
         }
-        let count = sources.count
-        let verb = move ? "Moving" : "Copying"
-        let title = "\(verb) \(Format.items(count)) to “\(Location.displayName(of: folder))”"
-        run(ops, actionName: move ? "Move" : "Copy", progressTitle: title, window: window) { changes, _ in
-            completion?(changes.compactMap { change in
+        guard !ops.isEmpty else {
+            completion?([])
+            return
+        }
+        let mergedInto: [URL] = sources.map { folder.appendingPathComponent($0.lastPathComponent) }.filter { target in
+            ops.contains { op in
+                switch op {
+                case .copy(_, let to), .move(_, let to): return to.isDescendant(of: target)
+                default: return false
+                }
+            }
+        }
+        let title = move
+            ? String(localized: "Moving \(Format.items(sources.count)) to “\(Location.displayName(of: folder))”")
+            : String(localized: "Copying \(Format.items(sources.count)) to “\(Location.displayName(of: folder))”")
+        run(ops, actionName: move ? String(localized: "Move") : String(localized: "Copy"), progressTitle: title, window: window) { changes, _ in
+            let placed: [URL] = changes.compactMap { change in
                 switch change {
-                case .copied, .moved: return change.resultURL
+                case .copied(_, let to), .moved(_, let to): return to.parentFolder.isSameItem(as: folder) ? to : nil
                 default: return nil
                 }
-            })
+            }
+            completion?(placed + mergedInto)
         }
     }
 
-    /// Works out the operations for a copy or move, asking about name conflicts like Explorer.
-    private func plan(sources: [URL], into folder: URL, move: Bool, window: NSWindow?) -> [FileOp]? {
-        let fm = FileManager.default
-        var ops: [FileOp] = []
-        var plannedNames = Set<String>()
-        var rememberedChoice: ConflictChoice?
-
-        func taken(_ name: String) -> Bool {
-            plannedNames.contains(name.lowercased()) || fm.fileExists(atPath: folder.appendingPathComponent(name).path)
-        }
-
-        let conflicts = sources.filter { source in
-            !source.parentFolder.isSameItem(as: folder) && fm.fileExists(atPath: folder.appendingPathComponent(source.lastPathComponent).path)
-        }
-        var conflictsLeft = conflicts.count
-
-        for source in sources {
-            if source.isSameItem(as: folder) || folder.isDescendant(of: source) {
-                showAlert(
-                    message: "The destination folder is a subfolder of the source folder.",
-                    info: "“\(source.lastPathComponent)” can't be \(move ? "moved" : "copied") into itself.",
-                    window: window
-                )
-                return nil
-            }
-            let isFolder = (try? source.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-
-            if source.parentFolder.isSameItem(as: folder) {
-                guard !move else { continue }  // Moving onto itself does nothing.
-                let name = NameGenerator.copyName(for: source.lastPathComponent, isFolder: isFolder, exists: taken)
-                plannedNames.insert(name.lowercased())
-                ops.append(.copy(source, folder.appendingPathComponent(name)))
-                continue
-            }
-
-            let destination = folder.appendingPathComponent(source.lastPathComponent)
-            let transferOp: (URL) -> FileOp = { move ? .move(source, $0) : .copy(source, $0) }
-
-            guard fm.fileExists(atPath: destination.path) || plannedNames.contains(source.lastPathComponent.lowercased()) else {
-                plannedNames.insert(source.lastPathComponent.lowercased())
-                ops.append(transferOp(destination))
-                continue
-            }
-
-            let choice: ConflictChoice
-            if let rememberedChoice {
-                choice = rememberedChoice
-            } else {
-                let answer = askAboutConflict(name: source.lastPathComponent, isFolder: isFolder, folder: folder, remaining: conflictsLeft)
-                choice = answer.choice
-                if answer.applyToAll { rememberedChoice = choice }
-            }
-            conflictsLeft -= 1
-
-            switch choice {
-            case .cancel:
-                return nil
-            case .skip:
-                continue
-            case .replace:
-                ops.append(.trash(destination))
-                ops.append(transferOp(destination))
-            case .keepBoth:
-                let (base, ext) = NameGenerator.split(source.lastPathComponent, isFolder: isFolder)
-                let name = NameGenerator.uniqueName(base: base, ext: ext, exists: taken)
-                plannedNames.insert(name.lowercased())
-                ops.append(transferOp(folder.appendingPathComponent(name)))
-            }
-        }
-        return ops
-    }
-
-    private func askAboutConflict(name: String, isFolder: Bool, folder: URL, remaining: Int) -> (choice: ConflictChoice, applyToAll: Bool) {
+    private func askAboutFile(_ conflict: TransferPlanner.Conflict) -> (TransferPlanner.FileChoice, applyToAll: Bool) {
         let alert = NSAlert()
-        alert.messageText = "The destination already has a \(isFolder ? "folder" : "file") named “\(name)”"
-        alert.informativeText = "in “\(Location.displayName(of: folder))”. Replacing moves the existing item to the Trash."
-        alert.addButton(withTitle: "Replace")
-        alert.addButton(withTitle: "Skip")
-        alert.addButton(withTitle: "Keep Both")
-        alert.addButton(withTitle: "Cancel")
-        if remaining > 1 {
-            alert.showsSuppressionButton = true
-            alert.suppressionButton?.title = "Do this for the next \(remaining - 1) conflict\(remaining - 1 == 1 ? "" : "s")"
-        }
+        alert.messageText = String(localized: "The destination already has a file named “\(conflict.name)”")
+        alert.informativeText = String(localized: "in “\(Location.displayName(of: conflict.destinationFolder))”. Replacing moves the existing file to the Trash.")
+        alert.addButton(withTitle: String(localized: "Replace"))
+        alert.addButton(withTitle: String(localized: "Skip"))
+        alert.addButton(withTitle: String(localized: "Keep Both"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        addApplyToAll(alert, remaining: conflict.remaining)
         let response = alert.runModal()
         let applyToAll = alert.suppressionButton?.state == .on
         switch response {
@@ -209,6 +159,34 @@ final class FileOperationService {
         case .alertThirdButtonReturn: return (.keepBoth, applyToAll)
         default: return (.cancel, false)
         }
+    }
+
+    /// Explorer's "Confirm Folder Replace": merging keeps everything and only asks about files that clash.
+    private func askAboutFolder(_ conflict: TransferPlanner.Conflict) -> (TransferPlanner.FolderChoice, applyToAll: Bool) {
+        let alert = NSAlert()
+        alert.messageText = String(localized: "This destination already contains a folder named “\(conflict.name)”")
+        alert.informativeText = String(localized: "If any files have the same names, you'll be asked whether to replace those files.\n\nDo you want to merge the two folders?")
+        alert.addButton(withTitle: String(localized: "Merge"))
+        alert.addButton(withTitle: String(localized: "Skip"))
+        alert.addButton(withTitle: String(localized: "Keep Both"))
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        addApplyToAll(alert, remaining: conflict.remaining)
+        let response = alert.runModal()
+        let applyToAll = alert.suppressionButton?.state == .on
+        switch response {
+        case .alertFirstButtonReturn: return (.merge, applyToAll)
+        case .alertSecondButtonReturn: return (.skip, applyToAll)
+        case .alertThirdButtonReturn: return (.keepBoth, applyToAll)
+        default: return (.cancel, false)
+        }
+    }
+
+    private func addApplyToAll(_ alert: NSAlert, remaining: Int) {
+        guard remaining > 1 else { return }
+        alert.showsSuppressionButton = true
+        alert.suppressionButton?.title = remaining - 1 == 1
+            ? String(localized: "Do this for the next conflict")
+            : String(localized: "Do this for the next \(remaining - 1) conflicts")
     }
 
     // MARK: - Delete
@@ -228,12 +206,14 @@ final class FileOperationService {
             if noTrash, let first = remaining.first {
                 let alert = NSAlert()
                 alert.messageText = remaining.count == 1
-                    ? "“\(first.lastPathComponent)” can't be moved to the Trash."
-                    : "These \(remaining.count) items can't be moved to the Trash."
-                alert.informativeText = "This drive doesn't have a Trash. Do you want to delete \(remaining.count == 1 ? "it" : "them") permanently?"
+                    ? String(localized: "“\(first.lastPathComponent)” can't be moved to the Trash.")
+                    : String(localized: "These \(remaining.count) items can't be moved to the Trash.")
+                alert.informativeText = remaining.count == 1
+                    ? String(localized: "This drive doesn't have a Trash. Do you want to delete it permanently?")
+                    : String(localized: "This drive doesn't have a Trash. Do you want to delete them permanently?")
                 alert.alertStyle = .warning
-                alert.addButton(withTitle: "Delete")
-                alert.addButton(withTitle: "Cancel")
+                alert.addButton(withTitle: String(localized: "Delete"))
+                alert.addButton(withTitle: String(localized: "Cancel"))
                 if alert.runModal() == .alertFirstButtonReturn {
                     self.deletePermanently(remaining, window: window, confirm: false)
                 }
@@ -251,10 +231,10 @@ final class FileOperationService {
             alert.messageText = urls.count == 1
                 ? "Are you sure you want to permanently delete “\(first.lastPathComponent)”?"
                 : "Are you sure you want to permanently delete these \(urls.count) items?"
-            alert.informativeText = "You can't undo this action."
+            alert.informativeText = String(localized: "You can't undo this action.")
             alert.alertStyle = .warning
-            alert.addButton(withTitle: "Delete")
-            alert.addButton(withTitle: "Cancel")
+            alert.addButton(withTitle: String(localized: "Delete"))
+            alert.addButton(withTitle: String(localized: "Cancel"))
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         run(urls.map { .remove($0) }, actionName: "Delete", progressTitle: "Deleting \(Format.items(urls.count))", window: window) { _, _ in
@@ -277,7 +257,7 @@ final class FileOperationService {
         let destination = url.deletingLastPathComponent().appendingPathComponent(trimmed)
         let caseOnly = destination.pathKey.lowercased() == url.pathKey.lowercased()
         if !caseOnly && FileManager.default.fileExists(atPath: destination.path) {
-            showAlert(message: "There is already a file with the same name in this location.", info: "“\(trimmed)”", window: window)
+            showAlert(message: String(localized: "There is already a file with the same name in this location."), info: String(localized: "“\(trimmed)”"), window: window)
             return nil
         }
         let ops: [FileOp]
@@ -363,7 +343,7 @@ final class FileOperationService {
                 self.didApply([.created(destination)], actionName: "Compress")
                 completion(destination)
             } else {
-                self.showAlert(message: "Arbor couldn't create “\(zipName)”.", info: nil, window: window)
+                self.showAlert(message: String(localized: "Arbor couldn't create “\(zipName)”."), info: nil, window: window)
                 completion(nil)
             }
         }
@@ -383,7 +363,7 @@ final class FileOperationService {
                 self.didApply([.created(destination)], actionName: "Extract")
                 completion(destination)
             } else {
-                self.showAlert(message: "Arbor couldn't extract “\(archive.lastPathComponent)”.", info: "The archive may be damaged or use an unsupported format.", window: window)
+                self.showAlert(message: String(localized: "Arbor couldn't extract “\(archive.lastPathComponent)”."), info: String(localized: "The archive may be damaged or use an unsupported format."), window: window)
                 completion(nil)
             }
         }

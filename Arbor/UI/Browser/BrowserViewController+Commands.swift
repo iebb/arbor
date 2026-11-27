@@ -91,6 +91,9 @@ extension BrowserViewController: NSMenuItemValidation {
         case #selector(sortByFromMenu(_:)):
             menuItem.state = SortKey.allCases.indices.contains(menuItem.tag) && SortKey.allCases[menuItem.tag] == viewSettings.sort.key ? .on : .off
             return !location.isThisMac
+        case #selector(groupByFromMenu(_:)):
+            menuItem.state = GroupKey.allCases.indices.contains(menuItem.tag) && GroupKey.allCases[menuItem.tag] == viewSettings.groupBy ? .on : .off
+            return !location.isThisMac
         case #selector(setSortAscending(_:)):
             menuItem.state = viewSettings.sort.ascending ? .on : .off
             return !location.isThisMac
@@ -167,8 +170,8 @@ extension BrowserViewController: NSMenuItemValidation {
         let panel = NSOpenPanel()
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.allowedContentTypes = [.application]
-        panel.prompt = "Open"
-        panel.message = "Choose an app to open “\(urls[0].lastPathComponent)”"
+        panel.prompt = String(localized: "Open")
+        panel.message = String(localized: "Choose an app to open “\(urls[0].lastPathComponent)”")
         guard panel.runModal() == .OK, let app = panel.url else { return }
         NSWorkspace.shared.open(urls, withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
     }
@@ -249,11 +252,11 @@ extension BrowserViewController: NSMenuItemValidation {
 
     private func confirmExtensionChange() -> Bool {
         let alert = NSAlert()
-        alert.messageText = "Rename"
-        alert.informativeText = "If you change a file name extension, the file might become unusable.\n\nAre you sure you want to change it?"
+        alert.messageText = String(localized: "Rename")
+        alert.informativeText = String(localized: "If you change a file name extension, the file might become unusable.\n\nAre you sure you want to change it?")
         alert.alertStyle = .warning
-        alert.addButton(withTitle: "Yes")
-        alert.addButton(withTitle: "No")
+        alert.addButton(withTitle: String(localized: "Yes"))
+        alert.addButton(withTitle: String(localized: "No"))
         return alert.runModal() == .alertFirstButtonReturn
     }
 
@@ -364,6 +367,51 @@ extension BrowserViewController: NSMenuItemValidation {
         }
     }
 
+    // MARK: Network
+
+    /// Finder's ⌘K: connect once and open the share.
+    @objc func connectToServer(_ sender: Any?) {
+        guard let answer = ConnectToServerDialog.run(mapping: false) else { return }
+        connect(to: answer.url, remember: answer.remember, reconnect: answer.reconnect)
+    }
+
+    /// Explorer's "Map network drive": connect and keep the server on This Mac.
+    @objc func mapNetworkDrive(_ sender: Any?) {
+        guard let answer = ConnectToServerDialog.run(mapping: true) else { return }
+        connect(to: answer.url, remember: answer.remember, reconnect: answer.reconnect)
+    }
+
+    func connect(to url: URL, remember: Bool, reconnect: Bool) {
+        guard NetworkLocations.isMountable(url) else {
+            NSWorkspace.shared.open(url)
+            return
+        }
+        if remember { NetworkLocations.save(NetworkLocation(address: url.absoluteString, reconnectAtLaunch: reconnect)) }
+        statusBar.setBusy(true)
+        NetworkLocations.connect(url) { [weak self] result in
+            guard let self else { return }
+            self.statusBar.setBusy(false)
+            switch result {
+            case .success(let mountPoint):
+                self.navigate(to: .folder(mountPoint))
+            case .failure(let error as CocoaError) where error.code == .userCancelled:
+                break
+            case .failure(let error):
+                FileOperationService.shared.present(error, window: self.view.window)
+            }
+        }
+    }
+
+    @objc func forgetNetworkLocation(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NetworkLocations.forget(url.absoluteString)
+    }
+
+    @objc func connectNetworkLocation(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        connect(to: url, remember: false, reconnect: false)
+    }
+
     // MARK: Selection
 
     @objc func selectNone(_ sender: Any?) {
@@ -416,6 +464,11 @@ extension BrowserViewController: NSMenuItemValidation {
         var sort = viewSettings.sort
         if sort.key == key { sort.ascending.toggle() } else { sort = SortOrder(key: key, ascending: key == .name || key == .type) }
         setSort(sort)
+    }
+
+    @objc func groupByFromMenu(_ sender: NSMenuItem) {
+        guard GroupKey.allCases.indices.contains(sender.tag) else { return }
+        setGroupBy(GroupKey.allCases[sender.tag])
     }
 
     @objc func setSortAscending(_ sender: Any?) {

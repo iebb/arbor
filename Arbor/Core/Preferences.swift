@@ -15,12 +15,12 @@ enum StartLocation: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .home: return "Home"
-        case .thisMac: return "This Mac"
-        case .iCloudDrive: return "iCloud Drive"
-        case .desktop: return "Desktop"
-        case .documents: return "Documents"
-        case .downloads: return "Downloads"
+        case .home: return String(localized: "Home")
+        case .thisMac: return String(localized: "This Mac")
+        case .iCloudDrive: return String(localized: "iCloud Drive")
+        case .desktop: return String(localized: "Desktop")
+        case .documents: return String(localized: "Documents")
+        case .downloads: return String(localized: "Downloads")
         }
     }
 
@@ -167,6 +167,13 @@ final class Preferences {
     var backspaceGoesBack: Bool { self[.backspaceGoesBack] }
     var showPreviewPane: Bool { get { self[.showPreviewPane] } set { self[.showPreviewPane] = newValue } }
     var showNavigationPane: Bool { get { self[.showNavigationPane] } set { self[.showNavigationPane] = newValue } }
+
+    /// The system-wide shortcut that opens a new Arbor window (Explorer's Win+E). Off by default,
+    /// because a global shortcut takes the key away from every other app.
+    var hotKey: HotKeyChoice {
+        get { HotKeyChoice(rawValue: defaults.string(forKey: "GlobalHotKey") ?? "") ?? .off }
+        set { defaults.set(newValue.rawValue, forKey: "GlobalHotKey"); changed() }
+    }
 
     var startLocation: StartLocation {
         get { StartLocation(rawValue: defaults.string(forKey: Self.startLocationKey) ?? "") ?? .home }

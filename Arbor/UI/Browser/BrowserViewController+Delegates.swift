@@ -165,11 +165,13 @@ extension BrowserViewController: NavigationPaneDelegate {
 
 extension BrowserViewController: ThisMacDelegate {
     func thisMac(_ controller: ThisMacViewController, open url: URL) {
-        navigate(to: .folder(url))
+        if url.isFileURL { navigate(to: .folder(url)) } else { connect(to: url, remember: false, reconnect: false) }
     }
 
     func thisMac(_ controller: ThisMacViewController, menuFor url: URL?, isVolume: Bool) -> NSMenu? {
-        guard let url, let item = FileItem(url: url) else { return nil }
+        guard let url else { return nil }
+        if !url.isFileURL { return networkLocationMenu(for: url) }
+        guard let item = FileItem(url: url) else { return nil }
         return itemMenu(for: [item])
     }
 
@@ -191,6 +193,13 @@ extension BrowserViewController: AddressBarDelegate {
     }
 
     func addressBarSubmit(path: String) -> Bool {
+        // \\server\share and smb://server/share connect to the server, as in Explorer.
+        let trimmed = path.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("\\\\") || trimmed.range(of: "^(smb|cifs|afp|nfs|webdav)://", options: [.regularExpression, .caseInsensitive]) != nil,
+           let url = NetworkLocations.normalizedURL(trimmed) {
+            connect(to: url, remember: false, reconnect: false)
+            return true
+        }
         switch PathResolver.resolve(path, relativeTo: location.folderURL) {
         case .location(let destination):
             navigate(to: destination)
@@ -204,8 +213,8 @@ extension BrowserViewController: AddressBarDelegate {
             return true
         case .notFound(let text):
             FileOperationService.shared.showAlert(
-                message: "Arbor can't find “\(text)”.",
-                info: "Check the spelling and try again.",
+                message: String(localized: "Arbor can't find “\(text)”."),
+                info: String(localized: "Check the spelling and try again."),
                 window: view.window
             )
             return false

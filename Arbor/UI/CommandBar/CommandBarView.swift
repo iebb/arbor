@@ -30,17 +30,17 @@ protocol CommandBarDelegate: AnyObject {
 final class CommandBarView: NSView {
     weak var delegate: CommandBarDelegate?
 
-    private lazy var newButton = HoverButton(symbol: "plus.circle", title: "New", toolTip: "Create a new item", target: self, action: #selector(newPressed(_:)))
-    private lazy var cutButton = HoverButton(symbol: "scissors", toolTip: "Cut (⌘X)", target: self, action: #selector(cutPressed))
-    private lazy var copyButton = HoverButton(symbol: "doc.on.doc", toolTip: "Copy (⌘C)", target: self, action: #selector(copyPressed))
-    private lazy var pasteButton = HoverButton(symbol: "doc.on.clipboard", toolTip: "Paste (⌘V)", target: self, action: #selector(pastePressed))
-    private lazy var renameButton = HoverButton(symbol: "character.cursor.ibeam", toolTip: "Rename (F2)", target: self, action: #selector(renamePressed))
-    private lazy var shareButton = HoverButton(symbol: "square.and.arrow.up", toolTip: "Share", target: self, action: #selector(sharePressed(_:)))
-    private lazy var deleteButton = HoverButton(symbol: "trash", toolTip: "Delete (Del or ⌘⌫)", target: self, action: #selector(deletePressed))
-    private lazy var sortButton = HoverButton(symbol: "arrow.up.arrow.down", title: "Sort", toolTip: "Sort items", target: self, action: #selector(sortPressed(_:)))
-    private lazy var viewButton = HoverButton(symbol: "square.grid.2x2", title: "View", toolTip: "Change the layout", target: self, action: #selector(viewPressed(_:)))
-    private lazy var moreButton = HoverButton(symbol: "ellipsis", toolTip: "See more", target: self, action: #selector(morePressed(_:)))
-    private lazy var previewButton = HoverButton(symbol: "sidebar.right", title: "Preview", toolTip: "Preview pane (⌥P)", target: self, action: #selector(previewPressed))
+    private lazy var newButton = HoverButton(symbol: "plus.circle", title: String(localized: "New"), toolTip: String(localized: "Create a new item"), target: self, action: #selector(newPressed(_:)))
+    private lazy var cutButton = HoverButton(symbol: "scissors", toolTip: String(localized: "Cut (⌘X)"), target: self, action: #selector(cutPressed))
+    private lazy var copyButton = HoverButton(symbol: "doc.on.doc", toolTip: String(localized: "Copy (⌘C)"), target: self, action: #selector(copyPressed))
+    private lazy var pasteButton = HoverButton(symbol: "doc.on.clipboard", toolTip: String(localized: "Paste (⌘V)"), target: self, action: #selector(pastePressed))
+    private lazy var renameButton = HoverButton(symbol: "character.cursor.ibeam", toolTip: String(localized: "Rename (F2)"), target: self, action: #selector(renamePressed))
+    private lazy var shareButton = HoverButton(symbol: "square.and.arrow.up", toolTip: String(localized: "Share"), target: self, action: #selector(sharePressed(_:)))
+    private lazy var deleteButton = HoverButton(symbol: "trash", toolTip: String(localized: "Delete (Del or ⌘⌫)"), target: self, action: #selector(deletePressed))
+    private lazy var sortButton = HoverButton(symbol: "arrow.up.arrow.down", title: String(localized: "Sort"), toolTip: String(localized: "Sort items"), target: self, action: #selector(sortPressed(_:)))
+    private lazy var viewButton = HoverButton(symbol: "square.grid.2x2", title: String(localized: "View"), toolTip: String(localized: "Change the layout"), target: self, action: #selector(viewPressed(_:)))
+    private lazy var moreButton = HoverButton(symbol: "ellipsis", toolTip: String(localized: "See more"), target: self, action: #selector(morePressed(_:)))
+    private lazy var previewButton = HoverButton(symbol: "sidebar.right", title: String(localized: "Preview"), toolTip: String(localized: "Preview pane (⌥P)"), target: self, action: #selector(previewPressed))
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -114,8 +114,8 @@ final class StatusBarView: NSView {
     var onViewModeSelected: ((ViewMode) -> Void)?
     private let label = NSTextField.label("", size: 11.5, color: .secondaryLabelColor)
     private let spinner = NSProgressIndicator()
-    private lazy var detailsButton = HoverButton(symbol: "list.bullet.rectangle", toolTip: "Details (⌃⇧6)", target: self, action: #selector(detailsPressed))
-    private lazy var iconsButton = HoverButton(symbol: "square.grid.2x2", toolTip: "Large icons (⌃⇧2)", target: self, action: #selector(iconsPressed))
+    private lazy var detailsButton = HoverButton(symbol: "list.bullet.rectangle", toolTip: String(localized: "Details (⌃⇧6)"), target: self, action: #selector(detailsPressed))
+    private lazy var iconsButton = HoverButton(symbol: "square.grid.2x2", toolTip: String(localized: "Large icons (⌃⇧2)"), target: self, action: #selector(iconsPressed))
 
     var viewMode: ViewMode = .details {
         didSet {
@@ -153,7 +153,7 @@ final class StatusBarView: NSView {
     func update(itemCount: Int, selectedCount: Int, selectedSize: Int64?) {
         var text = Format.items(itemCount)
         if selectedCount > 0 {
-            text += "   |   \(selectedCount == 1 ? "1 item" : "\(selectedCount) items") selected"
+            text += "   |   " + (selectedCount == 1 ? String(localized: "1 item selected") : String(localized: "\(selectedCount) items selected"))
             if let selectedSize { text += "  \(Format.bytes(selectedSize))" }
         }
         label.stringValue = text

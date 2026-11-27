@@ -24,16 +24,16 @@ enum Breadcrumbs {
     static func segments(for location: Location) -> [BreadcrumbSegment] {
         switch location {
         case .thisMac:
-            return [BreadcrumbSegment(title: "This Mac", location: .thisMac)]
+            return [BreadcrumbSegment(title: String(localized: "This Mac"), location: .thisMac)]
         case .folder(let url):
             return folderSegments(url)
         case .search(let root, _):
-            return folderSegments(root) + [BreadcrumbSegment(title: "Search Results in \(Location.displayName(of: root))", location: location)]
+            return folderSegments(root) + [BreadcrumbSegment(title: String(localized: "Search Results in \(Location.displayName(of: root))"), location: location)]
         }
     }
 
     private static func folderSegments(_ url: URL) -> [BreadcrumbSegment] {
-        var result = [BreadcrumbSegment(title: "This Mac", location: .thisMac)]
+        var result = [BreadcrumbSegment(title: String(localized: "This Mac"), location: .thisMac)]
         let volumes = VolumeService.mountedVolumes()
         let volumeURL = VolumeService.volume(containing: url, in: volumes)?.url ?? URL(fileURLWithPath: "/", isDirectory: true)
         result.append(BreadcrumbSegment(title: Location.displayName(of: volumeURL), location: .folder(volumeURL)))
@@ -56,10 +56,10 @@ enum Breadcrumbs {
 final class AddressBarView: NSView, NSTextFieldDelegate, NSSearchFieldDelegate {
     weak var delegate: AddressBarDelegate?
 
-    let backButton = HoverButton(symbol: "arrow.left", toolTip: "Back (⌥←)", target: nil, action: nil)
-    let forwardButton = HoverButton(symbol: "arrow.right", toolTip: "Forward (⌥→)", target: nil, action: nil)
-    let upButton = HoverButton(symbol: "arrow.up", toolTip: "Up to parent folder (⌥↑)", target: nil, action: nil)
-    let refreshButton = HoverButton(symbol: "arrow.clockwise", toolTip: "Refresh (F5)", target: nil, action: nil)
+    let backButton = HoverButton(symbol: "arrow.left", toolTip: String(localized: "Back (⌥←)"), target: nil, action: nil)
+    let forwardButton = HoverButton(symbol: "arrow.right", toolTip: String(localized: "Forward (⌥→)"), target: nil, action: nil)
+    let upButton = HoverButton(symbol: "arrow.up", toolTip: String(localized: "Up to parent folder (⌥↑)"), target: nil, action: nil)
+    let refreshButton = HoverButton(symbol: "arrow.clockwise", toolTip: String(localized: "Refresh (F5)"), target: nil, action: nil)
     let addressBox = AddressBoxView()
     let breadcrumbs = BreadcrumbView()
     let pathField = NSTextField()
@@ -106,7 +106,7 @@ final class AddressBarView: NSView, NSTextFieldDelegate, NSSearchFieldDelegate {
         addressBox.addSubview(pathField)
 
         searchField.translatesAutoresizingMaskIntoConstraints = false
-        searchField.placeholderString = "Search"
+        searchField.placeholderString = String(localized: "Search")
         searchField.sendsSearchStringImmediately = false
         searchField.sendsWholeSearchString = false
         searchField.target = self
@@ -155,8 +155,8 @@ final class AddressBarView: NSView, NSTextFieldDelegate, NSSearchFieldDelegate {
         backButton.menu = delegate?.addressBarHistoryMenu(back: true)
         forwardButton.menu = delegate?.addressBarHistoryMenu(back: false)
         breadcrumbs.set(Breadcrumbs.segments(for: location), icon: Breadcrumbs.icon(for: location))
-        let scope = location.scopeURL.map { Location.displayName(of: $0) } ?? "This Mac"
-        searchField.placeholderString = "Search \(scope)"
+        let scope = location.scopeURL.map { Location.displayName(of: $0) } ?? String(localized: "This Mac")
+        searchField.placeholderString = String(localized: "Search \(scope)")
         if case .search(_, let query) = location {
             if searchField.stringValue != query { searchField.stringValue = query }
         } else {
@@ -314,7 +314,7 @@ final class BreadcrumbView: NSView {
         overflowButton.showsBorderOnlyWhileMouseInside = true
         overflowButton.target = self
         overflowButton.action = #selector(showOverflow(_:))
-        overflowButton.toolTip = "Previous locations"
+        overflowButton.toolTip = String(localized: "Previous locations")
         addSubview(overflowButton)
     }
 
@@ -340,7 +340,7 @@ final class BreadcrumbView: NSView {
             button.bezelStyle = .recessed
             button.showsBorderOnlyWhileMouseInside = true
             button.tag = index
-            button.toolTip = "Show folders"
+            button.toolTip = String(localized: "Show folders")
             addSubview(button)
             return button
         }

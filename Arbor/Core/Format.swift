@@ -46,7 +46,7 @@ enum Format {
 
     /// Status bar / Properties sizes: three significant digits in binary units ("1.50 KB", "12.3 MB").
     static func bytes(_ bytes: Int64) -> String {
-        if bytes < 1024 { return bytes == 1 ? "1 byte" : "\(bytes) bytes" }
+        if bytes < 1024 { return bytes == 1 ? String(localized: "1 byte") : String(localized: "\(bytes) bytes") }
         let units = ["KB", "MB", "GB", "TB", "PB"]
         var value = Double(bytes) / 1024
         var unit = 0
@@ -67,10 +67,10 @@ enum Format {
 
     /// "1.20 MB (1,258,291 bytes)" as in the Properties window.
     static func bytesWithExact(_ bytes: Int64) -> String {
-        "\(Format.bytes(bytes)) (\(number(bytes)) bytes)"
+        String(localized: "\(Format.bytes(bytes)) (\(number(bytes)) bytes)")
     }
 
     static func items(_ count: Int) -> String {
-        count == 1 ? "1 item" : "\(number(Int64(count))) items"
+        count == 1 ? String(localized: "1 item") : String(localized: "\(number(Int64(count))) items")
     }
 }

@@ -4,7 +4,32 @@ import AppKit
 final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
     weak var delegate: ItemPresenterDelegate?
     let tableView = ExplorerTableView()
+    /// All items, in display order (flattened across groups).
     private var items: [FileItem] = []
+    /// What each table row shows: an item, or a group header ("Today (3)").
+    private var rows: [Row] = []
+    private enum Row {
+        case header(String, count: Int)
+        case item(FileItem)
+    }
+
+    private func item(_ row: Int) -> FileItem? {
+        guard rows.indices.contains(row), case .item(let item) = rows[row] else { return nil }
+        return item
+    }
+
+    private var itemRows: [Int] { rows.indices.filter { item($0) != nil } }
+
+    private func row(of url: URL) -> Int? {
+        rows.indices.first { item($0)?.url.isSameItem(as: url) == true }
+    }
+
+    private static func buildRows(_ items: [FileItem], groupBy: GroupKey) -> [Row] {
+        guard groupBy != .none else { return items.map(Row.item) }
+        return FileGrouping.groups(items, by: groupBy).flatMap { group in
+            [Row.header(group.title, count: group.items.count)] + group.items.map(Row.item)
+        }
+    }
     private var context = PresentationContext(showExtensions: false, cutPaths: [], isSearch: false, viewMode: .details, sort: SortOrder())
     private var suppressSortCallback = false
     private var renamingURL: URL?
@@ -20,12 +45,12 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
 
         var title: String {
             switch self {
-            case .name: return "Name"
-            case .folder: return "Folder"
-            case .dateModified: return "Date modified"
-            case .type: return "Type"
-            case .size: return "Size"
-            case .dateCreated: return "Date created"
+            case .name: return String(localized: "Name")
+            case .folder: return String(localized: "Folder")
+            case .dateModified: return String(localized: "Date modified")
+            case .type: return String(localized: "Type")
+            case .size: return String(localized: "Size")
+            case .dateCreated: return String(localized: "Date created")
             }
         }
 
@@ -91,13 +116,13 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
             return self.delegate?.presenter(self, menuFor: self.selectedItems)
         }
         tableView.onSlowClick = { [weak self] row in
-            guard let self, self.items.indices.contains(row) else { return }
-            self.beginRename(self.items[row].url)
+            guard let self, let item = self.item(row) else { return }
+            self.beginRename(item.url)
         }
         tableView.isSingleClickMode = { [weak self] in self?.context.display.singleClickToOpen ?? false }
         tableView.onSingleClickOpen = { [weak self] row in
-            guard let self, self.items.indices.contains(row) else { return }
-            self.delegate?.presenter(self, open: [self.items[row]])
+            guard let self, let item = self.item(row) else { return }
+            self.delegate?.presenter(self, open: [item])
         }
         tableView.onHover = { [weak self] row in self?.hoverChanged(row) }
 
@@ -115,7 +140,7 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     var keyView: NSView { tableView }
 
     var selectedItems: [FileItem] {
-        tableView.selectedRowIndexes.compactMap { items.indices.contains($0) ? items[$0] : nil }
+        tableView.selectedRowIndexes.compactMap { item($0) }
     }
 
     var containsFirstResponder: Bool {
@@ -131,6 +156,7 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
         deferredShow = nil
         let previouslySelected = Set(selectedItems.map(\.url.pathKey))
         items = newItems
+        rows = Self.buildRows(newItems, groupBy: newContext.groupBy)
         context = newContext
         tableView.tableColumn(withIdentifier: Column.folder.identifier)?.isHidden = !newContext.isSearch
         applyRowHeight()
@@ -138,8 +164,8 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
         tableView.sortDescriptors = [NSSortDescriptor(key: newContext.sort.key.rawValue, ascending: newContext.sort.ascending)]
         suppressSortCallback = false
         tableView.reloadData()
-        let rows = IndexSet(items.indices.filter { previouslySelected.contains(items[$0].url.pathKey) })
-        tableView.selectRowIndexes(rows, byExtendingSelection: false)
+        let selectedRows = IndexSet(itemRows.filter { previouslySelected.contains(item($0)!.url.pathKey) })
+        tableView.selectRowIndexes(selectedRows, byExtendingSelection: false)
         if scrollToTop { tableView.scrollRowToVisible(0) }
     }
 
@@ -150,17 +176,17 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
 
     func updateDecorations(_ newContext: PresentationContext) {
         context = newContext
-        guard !items.isEmpty, renamingURL == nil else { return }
+        guard !rows.isEmpty, renamingURL == nil else { return }
         applyRowHeight()
-        tableView.reloadData(forRowIndexes: IndexSet(items.indices), columnIndexes: IndexSet(tableView.tableColumns.indices))
+        tableView.reloadData(forRowIndexes: IndexSet(rows.indices), columnIndexes: IndexSet(tableView.tableColumns.indices))
     }
 
     func select(_ urls: Set<URL>, scroll: Bool) {
         guard renamingURL == nil else { return }  // changing selection would end the edit
         let keys = pathKeys(urls)
-        let rows = IndexSet(items.indices.filter { keys.contains(items[$0].url.pathKey) })
-        tableView.selectRowIndexes(rows, byExtendingSelection: false)
-        if scroll, let first = rows.first { tableView.scrollRowToVisible(first) }
+        let matching = IndexSet(itemRows.filter { keys.contains(item($0)!.url.pathKey) })
+        tableView.selectRowIndexes(matching, byExtendingSelection: false)
+        if scroll, let first = matching.first { tableView.scrollRowToVisible(first) }
         delegate?.presenterSelectionDidChange(self)
     }
 
@@ -168,13 +194,12 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     func selectNoItems() { tableView.deselectAll(nil) }
 
     func invertSelection() {
-        let all = IndexSet(items.indices)
+        let all = IndexSet(itemRows)
         tableView.selectRowIndexes(all.subtracting(tableView.selectedRowIndexes), byExtendingSelection: false)
     }
 
     func selectEdge(last: Bool) {
-        guard !items.isEmpty else { return }
-        let row = last ? items.count - 1 : 0
+        guard let row = last ? itemRows.last : itemRows.first else { return }
         tableView.selectRowIndexes([row], byExtendingSelection: false)
         tableView.scrollRowToVisible(row)
     }
@@ -186,19 +211,19 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     // MARK: Rename
 
     func beginRename(_ url: URL) {
-        guard let row = items.firstIndex(where: { $0.url.isSameItem(as: url) }),
+        guard let row = row(of: url), let target = item(row),
               let columnIndex = tableView.tableColumns.firstIndex(where: { $0.identifier == Column.name.identifier }) else { return }
         tableView.selectRowIndexes([row], byExtendingSelection: false)
         tableView.scrollRowToVisible(row)
         guard let cell = tableView.view(atColumn: columnIndex, row: row, makeIfNecessary: true) as? NameCellView,
               let field = cell.textField else { return }
-        renamingURL = items[row].url
+        renamingURL = target.url
         renameCancelled = false
         pointToSelect.cancel()
-        field.attributedStringValue = itemTitle(text(for: .name, item: items[row]), underline: false, font: .systemFont(ofSize: 13))
+        field.attributedStringValue = itemTitle(text(for: .name, item: target), underline: false, font: .systemFont(ofSize: 13))
         cell.setEditing(true)
         view.window?.makeFirstResponder(field)
-        selectBaseName(in: field, item: items[row], displayed: field.stringValue)
+        selectBaseName(in: field, item: target, displayed: field.stringValue)
     }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -237,8 +262,8 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     @objc private func doubleClicked() {
         guard !context.display.singleClickToOpen else { return }  // the first click already opened it
         let row = tableView.clickedRow
-        guard items.indices.contains(row) else { return }
-        delegate?.presenter(self, open: selectedItems.isEmpty ? [items[row]] : selectedItems)
+        guard let clicked = item(row) else { return }
+        delegate?.presenter(self, open: selectedItems.isEmpty ? [clicked] : selectedItems)
     }
 
     private func makeHeaderMenu() -> NSMenu {
@@ -250,7 +275,7 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
             menu.addItem(item)
         }
         menu.addItem(.separator())
-        let fit = NSMenuItem(title: "Size All Columns to Fit", action: #selector(sizeColumnsToFit), keyEquivalent: "")
+        let fit = NSMenuItem(title: String(localized: "Size All Columns to Fit"), action: #selector(sizeColumnsToFit), keyEquivalent: "")
         fit.target = self
         menu.addItem(fit)
         menu.delegate = HeaderMenuStateUpdater.shared
@@ -281,7 +306,17 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
 
     // MARK: Data source
 
-    func numberOfRows(in tableView: NSTableView) -> Int { items.count }
+    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+
+    func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
+        rows.indices.contains(row) && item(row) == nil
+    }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { item(row) != nil }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        item(row) == nil ? 30 : tableView.rowHeight
+    }
 
     private func text(for column: Column, item: FileItem) -> String {
         switch column {
@@ -295,8 +330,13 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        guard let tableColumn, let column = Column(rawValue: tableColumn.identifier.rawValue), items.indices.contains(row) else { return nil }
-        let item = items[row]
+        if rows.indices.contains(row), case .header(let title, let count) = rows[row] {
+            let identifier = NSUserInterfaceItemIdentifier("GroupHeader")
+            let header = tableView.makeView(withIdentifier: identifier, owner: self) as? GroupHeaderView ?? GroupHeaderView(identifier: identifier)
+            header.set(title: title, count: count)
+            return header
+        }
+        guard let tableColumn, let column = Column(rawValue: tableColumn.identifier.rawValue), let item = item(row) else { return nil }
         let dimmed = context.isDimmed(item)
         if column == .name {
             let cell = tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? NameCellView ?? NameCellView(identifier: tableColumn.identifier)
@@ -327,8 +367,8 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     }
 
     func tableView(_ tableView: NSTableView, typeSelectStringFor tableColumn: NSTableColumn?, row: Int) -> String? {
-        guard tableColumn?.identifier == Column.name.identifier, items.indices.contains(row) else { return nil }
-        return items[row].displayName(showExtensions: context.showExtensions)
+        guard tableColumn?.identifier == Column.name.identifier, let item = item(row) else { return nil }
+        return item.displayName(showExtensions: context.showExtensions)
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -340,8 +380,7 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
 
     /// Sets the name's underline and the check box for one row (skipped while that row is being renamed).
     private func decorate(_ cell: NameCellView, row: Int) {
-        guard items.indices.contains(row) else { return }
-        let item = items[row]
+        guard let item = item(row) else { return }
         if let renamingURL, item.url.isSameItem(as: renamingURL) { return }
         let selected = tableView.isRowSelected(row)
         let hovered = row == hoveredRow
@@ -370,7 +409,7 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
         decorate(row: row)
         guard context.display.singleClickToOpen, row >= 0, renamingURL == nil else { return pointToSelect.cancel() }
         pointToSelect.schedule { [weak self] in
-            guard let self, self.hoveredRow == row, self.renamingURL == nil, self.items.indices.contains(row) else { return }
+            guard let self, self.hoveredRow == row, self.renamingURL == nil, self.item(row) != nil else { return }
             let extend = NSEvent.modifierFlags.contains(.command)
             if extend || self.tableView.selectedRowIndexes != IndexSet(integer: row) {
                 self.tableView.selectRowIndexes([row], byExtendingSelection: extend)
@@ -387,12 +426,12 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     // MARK: Drag and drop
 
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
-        items.indices.contains(row) ? items[row].url as NSURL : nil
+        item(row).map { $0.url as NSURL }
     }
 
     private func dropTarget(row: Int, operation: NSTableView.DropOperation) -> FileItem? {
-        guard operation == .on, items.indices.contains(row), items[row].isFolder else { return nil }
-        return items[row]
+        guard operation == .on, let target = item(row), target.isFolder else { return nil }
+        return target
     }
 
     func tableView(_ tableView: NSTableView, validateDrop info: NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
@@ -583,4 +622,32 @@ final class TextCellView: NSTableCellView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+}
+
+/// Explorer's group header: String(localized: "Today (3)") followed by a hairline.
+final class GroupHeaderView: NSTableCellView {
+    private let label = NSTextField.label("", size: 12.5, weight: .semibold, color: .controlAccentColor)
+    private let line = NSBox()
+
+    init(identifier: NSUserInterfaceItemIdentifier) {
+        super.init(frame: .zero)
+        self.identifier = identifier
+        line.boxType = .separator
+        line.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        addSubview(line)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -5),
+            line.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 8),
+            line.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            line.centerYAnchor.constraint(equalTo: label.centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    func set(title: String, count: Int) {
+        label.stringValue = "\(title) (\(count))"
+    }
 }

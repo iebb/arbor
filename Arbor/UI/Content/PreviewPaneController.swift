@@ -4,7 +4,7 @@ import Quartz
 /// Explorer's preview pane (⌥P), powered by Quick Look.
 final class PreviewPaneController: NSViewController {
     private var previewView: QLPreviewView?
-    private let messageLabel = NSTextField.label("Select a file to preview.", size: 13, color: .secondaryLabelColor)
+    private let messageLabel = NSTextField.label(String(localized: "Select a file to preview."), size: 13, color: .secondaryLabelColor)
     private let nameLabel = NSTextField.label("", size: 13, weight: .semibold)
     private let infoLabel = NSTextField.label("", size: 11, color: .secondaryLabelColor)
     private var shownURL: URL?
@@ -86,7 +86,7 @@ final class PreviewPaneController: NSViewController {
             nameLabel.isHidden = true
             infoLabel.isHidden = true
             messageLabel.isHidden = false
-            messageLabel.stringValue = items.isEmpty ? "Select a file to preview." : "\(items.count) items selected"
+            messageLabel.stringValue = items.isEmpty ? String(localized: "Select a file to preview.") : String(localized: "\(items.count) items selected")
         }
     }
 

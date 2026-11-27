@@ -8,10 +8,12 @@ enum FileOp {
     case createFolder(URL)
     case createFile(URL)
     case remove(URL)
+    /// Removes a folder only if it's empty (what's left of a source folder after a merge-move).
+    case removeEmptyFolder(URL)
 
     var itemName: String {
         switch self {
-        case .copy(let url, _), .move(let url, _), .trash(let url), .createFolder(let url), .createFile(let url), .remove(let url):
+        case .copy(let url, _), .move(let url, _), .trash(let url), .createFolder(let url), .createFile(let url), .remove(let url), .removeEmptyFolder(let url):
             return url.lastPathComponent
         }
     }
@@ -23,6 +25,7 @@ enum FileChange {
     case moved(from: URL, to: URL)
     case trashed(original: URL, trashURL: URL?)
     case created(URL)
+    case removedEmptyFolder(URL)
 
     /// The operation that reverses this change (nil when it can't be undone).
     var inverse: FileOp? {
@@ -31,6 +34,7 @@ enum FileChange {
         case .moved(let from, let to): return .move(to, from)
         case .trashed(let original, let trashURL): return trashURL.map { .move($0, original) }
         case .created(let url): return .trash(url)
+        case .removedEmptyFolder(let url): return .createFolder(url)
         }
     }
 
@@ -39,7 +43,7 @@ enum FileChange {
         switch self {
         case .copied(_, let to), .moved(_, let to): return to
         case .created(let url): return url
-        case .trashed: return nil
+        case .trashed, .removedEmptyFolder: return nil
         }
     }
 
@@ -47,7 +51,7 @@ enum FileChange {
         switch self {
         case .copied(let from, let to), .moved(let from, let to): return [from.parentFolder, to.parentFolder]
         case .trashed(let original, _): return [original.parentFolder]
-        case .created(let url): return [url.parentFolder]
+        case .created(let url), .removedEmptyFolder(let url): return [url.parentFolder]
         }
     }
 }
@@ -83,6 +87,12 @@ struct FileOpEngine {
         case let .remove(url):
             try fileManager.removeItem(at: url)
             return nil
+        case let .removeEmptyFolder(url):
+            let leftovers = (try? fileManager.contentsOfDirectory(atPath: url.path)) ?? []
+            // Finder's .DS_Store doesn't count as content.
+            guard leftovers.allSatisfy({ $0 == ".DS_Store" }) else { return nil }
+            try fileManager.removeItem(at: url)
+            return .removedEmptyFolder(url)
         }
     }
 }
@@ -111,3 +121,5 @@ final class OperationProgress: @unchecked Sendable {
         lock.withLock { (completed, currentName) }
     }
 }
+
+extension FileOp: Equatable {}
