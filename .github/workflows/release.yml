@@ -49,7 +49,8 @@ jobs:
             MARKETING_VERSION="$VERSION" \
             CURRENT_PROJECT_VERSION="${{ github.run_number }}"
           ditto -c -k --sequesterRsrc --keepParent build/DerivedData/Build/Products/Release/Arbor.app "build/Arbor-$VERSION.zip"
-          shasum -a 256 "build/Arbor-$VERSION.zip" | tee "build/Arbor-$VERSION.zip.sha256"
+          # Write the bare file name so `shasum -c` works next to the downloaded zip.
+          (cd build && shasum -a 256 "Arbor-$VERSION.zip" | tee "Arbor-$VERSION.zip.sha256")
 
       - name: Publish GitHub release
         env:
