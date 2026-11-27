@@ -26,11 +26,16 @@ cat > build/ExportOptions-AppStore.plist <<PLIST
   <key>method</key><string>app-store-connect</string>
   <key>destination</key><string>upload</string>
   <key>teamID</key><string>$TEAM_ID</string>
-  <key>signingStyle</key><string>automatic</string>
+  <key>signingStyle</key><string>manual</string>
+  <key>signingCertificate</key><string>Apple Distribution</string>
+  <key>installerSigningCertificate</key><string>3rd Party Mac Developer Installer</string>
+  <key>provisioningProfiles</key><dict>
+    <key>ad.neko.arbor</key><string>Arbor Files Mac App Store</string>
+  </dict>
 </dict></plist>
 PLIST
 
 xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportOptionsPlist build/ExportOptions-AppStore.plist \
-  -exportPath build/AppStoreExport -allowProvisioningUpdates \
+  -exportPath build/AppStoreExport \
   -authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER"
 echo "Uploaded Arbor $VERSION ($BUILD) to App Store Connect."
