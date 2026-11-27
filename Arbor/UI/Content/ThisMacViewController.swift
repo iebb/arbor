@@ -20,8 +20,8 @@ final class ThisMacViewController: NSViewController {
     override func loadView() {
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 14, left: 18, bottom: 18, right: 18)
+        stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 18, right: 14)
         stack.translatesAutoresizingMaskIntoConstraints = false
 
         let document = FlippedView()
@@ -60,9 +60,9 @@ final class ThisMacViewController: NSViewController {
         let folderTiles = folders.filter { fm.fileExists(atPath: $0.path) }.map { url in
             TileView(url: url, title: Location.displayName(of: url), subtitle: nil, volume: nil)
         }
-        addSection("Folders (\(folderTiles.count))", tiles: folderTiles, tileSize: NSSize(width: 230, height: 58))
+        addSection("Folders (\(folderTiles.count))", tiles: folderTiles, tileSize: NSSize(width: Self.columnWidth, height: 58))
 
-        let volumes = VolumeService.mountedVolumes()
+        let volumes = VolumeService.visibleVolumes()
         let driveTiles = volumes.map { volume in
             TileView(
                 url: volume.url,
@@ -71,15 +71,28 @@ final class ThisMacViewController: NSViewController {
                 volume: volume
             )
         }
-        addSection("Devices and drives (\(driveTiles.count))", tiles: driveTiles, tileSize: NSSize(width: 290, height: 70))
+        addSection("Devices and drives (\(driveTiles.count))", tiles: driveTiles, tileSize: NSSize(width: Self.columnWidth, height: 68))
 
         if let selectedURL, !tiles.contains(where: { $0.url.isSameItem(as: selectedURL) }) { self.selectedURL = nil }
         tiles.forEach { $0.isSelected = $0.url.isSameItem(as: selectedURL ?? URL(fileURLWithPath: "/nonexistent")) }
     }
 
+    /// Both sections share one column width so folders and drives line up in the same columns.
+    static let columnWidth: CGFloat = 236
+
     private func addSection(_ title: String, tiles sectionTiles: [TileView], tileSize: NSSize) {
+        // Indent the header so it starts where the tile icons start.
         let header = NSTextField.label(title, size: 13, weight: .semibold, color: .secondaryLabelColor)
-        stack.addArrangedSubview(header)
+        let headerRow = NSView()
+        headerRow.translatesAutoresizingMaskIntoConstraints = false
+        headerRow.addSubview(header)
+        NSLayoutConstraint.activate([
+            header.leadingAnchor.constraint(equalTo: headerRow.leadingAnchor, constant: TileView.iconInset),
+            header.trailingAnchor.constraint(lessThanOrEqualTo: headerRow.trailingAnchor),
+            header.topAnchor.constraint(equalTo: headerRow.topAnchor, constant: 6),
+            header.bottomAnchor.constraint(equalTo: headerRow.bottomAnchor),
+        ])
+        stack.addArrangedSubview(headerRow)
         let flow = FlowView()
         flow.tileSize = tileSize
         for tile in sectionTiles {
@@ -96,7 +109,8 @@ final class ThisMacViewController: NSViewController {
             flow.addSubview(tile)
         }
         stack.addArrangedSubview(flow)
-        flow.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -36).isActive = true
+        flow.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -28).isActive = true
+        stack.setCustomSpacing(14, after: flow)
         tiles += sectionTiles
     }
 
@@ -156,6 +170,8 @@ final class FlowView: NSView {
 
 /// A folder or drive tile on the This Mac page.
 final class TileView: NSView {
+    static let iconInset: CGFloat = 10
+    static let iconSize: CGFloat = 48
     let url: URL
     let volume: VolumeInfo?
     var onClick: ((Int) -> Void)?
@@ -173,13 +189,12 @@ final class TileView: NSView {
         let titleLabel = NSTextField.label(title, size: 13)
         addSubview(icon)
         addSubview(titleLabel)
-        let iconSize: CGFloat = volume == nil ? 40 : 48
         var constraints = [
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 8),
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.iconInset),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: iconSize),
-            icon.heightAnchor.constraint(equalToConstant: iconSize),
-            titleLabel.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+            icon.widthAnchor.constraint(equalToConstant: Self.iconSize),
+            icon.heightAnchor.constraint(equalToConstant: Self.iconSize),
+            titleLabel.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 12),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8),
         ]
         if let volume {
@@ -188,9 +203,9 @@ final class TileView: NSView {
             addSubview(bar)
             addSubview(detail)
             constraints += [
-                titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 10),
+                titleLabel.topAnchor.constraint(equalTo: topAnchor, constant: 11),
                 bar.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
-                bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+                bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
                 bar.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 5),
                 bar.heightAnchor.constraint(equalToConstant: 12),
                 detail.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
@@ -201,7 +216,7 @@ final class TileView: NSView {
             constraints.append(titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor))
         }
         NSLayoutConstraint.activate(constraints)
-        toolTip = url.path
+        if Preferences.shared[.popUpDescriptions] { toolTip = url.path }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

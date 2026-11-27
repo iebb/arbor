@@ -120,6 +120,9 @@ enum MainMenu {
         menu.addItem(item("Preview Pane", #selector(B.togglePreviewPane(_:)), "p", [.command, .option]))
         menu.addItem(item("File Name Extensions", #selector(B.toggleFileExtensions(_:))))
         menu.addItem(item("Hidden Items", #selector(B.toggleHiddenItems(_:)), ".", [.command, .shift]))
+        menu.addItem(item("Item Check Boxes", #selector(B.toggleOption(_:)), object: FolderOption.itemCheckBoxes.rawValue))
+        menu.addItem(item("Compact View", #selector(B.toggleOption(_:)), object: FolderOption.compactView.rawValue))
+        menu.addItem(item("Status Bar", #selector(B.toggleOption(_:)), "/", [.command], object: FolderOption.showStatusBar.rawValue))
         menu.addItem(.separator())
         menu.addItem(item("Quick Look", #selector(B.quickLook(_:)), "y"))
         menu.addItem(item("Refresh", #selector(B.refresh(_:)), "r"))
@@ -155,6 +158,10 @@ enum MainMenu {
         menu.addItem(.separator())
         menu.addItem(item("Go to Folder…", #selector(B.focusAddressBar(_:)), "g", [.command, .shift]))
         menu.addItem(item("Edit Address", #selector(B.focusAddressBar(_:)), "l"))
+        menu.addItem(.separator())
+        let recent = NSMenu()
+        recent.delegate = RecentFilesMenu.shared
+        menu.addItem(submenu("Recent Files", recent))
         return menu
     }
 
@@ -172,4 +179,40 @@ enum MainMenu {
         menu.addItem(item("Arbor Keyboard Shortcuts", #selector(AppDelegate.showHelp(_:)), "?"))
         return menu
     }
+}
+
+/// Go › Recent Files: files opened from Arbor ("Show recently used files" in Folder Options).
+final class RecentFilesMenu: NSObject, NSMenuDelegate {
+    static let shared = RecentFilesMenu()
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.removeAllItems()
+        let files = Preferences.shared[.showRecentFiles] ? RecentItems.shared.recentFiles() : []
+        if files.isEmpty {
+            let empty = NSMenuItem(title: Preferences.shared[.showRecentFiles] ? "No Recent Files" : "Recent Files Are Turned Off", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+            return
+        }
+        for file in files {
+            let item = NSMenuItem(title: file.lastPathComponent, action: #selector(openFile(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = file
+            item.toolTip = file.path
+            item.image = IconCache.icon(for: file).menuSized
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+        let clear = NSMenuItem(title: "Clear Menu", action: #selector(clear), keyEquivalent: "")
+        clear.target = self
+        menu.addItem(clear)
+    }
+
+    @objc private func openFile(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        NSWorkspace.shared.open(url)
+        RecentItems.shared.recordFileOpen(url)
+    }
+
+    @objc private func clear() { RecentItems.shared.clear() }
 }

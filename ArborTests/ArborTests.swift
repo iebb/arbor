@@ -162,3 +162,98 @@ final class URLHelperTests: XCTestCase {
         XCTAssertNil(FileChange.trashed(original: a, trashURL: nil).inverse)
     }
 }
+
+final class FolderOptionsTests: XCTestCase {
+    func testExplorerDefaults() {
+        XCTAssertFalse(FolderOption.showExtensions.defaultValue, "known extensions are hidden by default")
+        XCTAssertFalse(FolderOption.showHidden.defaultValue)
+        XCTAssertTrue(FolderOption.hideProtectedSystemFiles.defaultValue)
+        XCTAssertTrue(FolderOption.showStatusBar.defaultValue)
+        XCTAssertFalse(FolderOption.singleClickToOpen.defaultValue)
+        XCTAssertTrue(FolderOption.searchSystemDirectories.defaultValue)
+        XCTAssertFalse(FolderOption.searchFileContents.defaultValue)
+    }
+
+    func testEveryDialogOptionBelongsToOneTab() {
+        let tabs = FolderOption.generalTab + FolderOption.viewTab + FolderOption.searchTab
+        XCTAssertEqual(tabs.count, Set(tabs).count)
+    }
+
+    func testSingleClickUnderlineAndCheckBoxRules() {
+        var display = DisplayOptions()
+        XCTAssertFalse(display.underlines(hovered: true), "double-click mode never underlines")
+        display.singleClickToOpen = true
+        XCTAssertTrue(display.underlines(hovered: true))
+        XCTAssertFalse(display.underlines(hovered: false))
+        display.underlineOnlyOnHover = false
+        XCTAssertTrue(display.underlines(hovered: false))
+
+        XCTAssertFalse(display.showsCheckBox(selected: true, hovered: true))
+        display.checkBoxes = true
+        XCTAssertTrue(display.showsCheckBox(selected: true, hovered: false))
+        XCTAssertTrue(display.showsCheckBox(selected: false, hovered: true))
+        XCTAssertFalse(display.showsCheckBox(selected: false, hovered: false))
+    }
+
+    func testProtectedFiles() {
+        XCTAssertTrue(ProtectedFiles.isProtected(URL(fileURLWithPath: "/tmp/x/.DS_Store")))
+        XCTAssertTrue(ProtectedFiles.isProtected(URL(fileURLWithPath: "/tmp/x/._photo.jpg")))
+        XCTAssertTrue(ProtectedFiles.isProtected(URL(fileURLWithPath: "/usr")))
+        XCTAssertFalse(ProtectedFiles.isProtected(URL(fileURLWithPath: "/Users")))
+        XCTAssertFalse(ProtectedFiles.isProtected(URL(fileURLWithPath: "/Users/me/usr")))
+        XCTAssertFalse(ProtectedFiles.isProtected(URL(fileURLWithPath: "/tmp/x/.gitignore")))
+    }
+}
+
+final class SearchServiceTests: XCTestCase {
+    private var root: URL!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("ArborSearch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("inner"), withIntermediateDirectories: true)
+        try "the quarterly budget".write(to: root.appendingPathComponent("notes.txt"), atomically: true, encoding: .utf8)
+        try "nothing here".write(to: root.appendingPathComponent("inner/other.txt"), atomically: true, encoding: .utf8)
+        try "x".write(to: root.appendingPathComponent("inner/secretplan.txt"), atomically: true, encoding: .utf8)
+        let zip = Process()
+        zip.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
+        zip.currentDirectoryURL = root
+        zip.arguments = ["-q", "bundle.zip", "inner/secretplan.txt"]
+        try zip.run()
+        zip.waitUntilExit()
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func names(_ query: String, contents: Bool = false, zips: Bool = false) async -> Set<String> {
+        let options = SearchOptions(showHidden: false, hideProtected: true, includeSystemDirectories: true, includeCompressedFiles: zips, searchContents: contents)
+        var found = Set<String>()
+        for await batch in SearchService.search(root: root, query: query, options: options) {
+            batch.forEach { found.insert($0.name) }
+        }
+        return found
+    }
+
+    func testNameSearchIgnoresContentsByDefault() async {
+        let found = await names("budget")
+        XCTAssertEqual(found, [])
+    }
+
+    func testContentSearch() async {
+        let found = await names("BUDGET", contents: true)
+        XCTAssertEqual(found, ["notes.txt"])
+    }
+
+    func testZipEntriesMatchTheArchive() async {
+        let withoutZips = await names("secretplan")
+        XCTAssertEqual(withoutZips, ["secretplan.txt"])
+        let withZips = await names("secretplan", zips: true)
+        XCTAssertEqual(withZips, ["secretplan.txt", "bundle.zip"])
+    }
+
+    func testWildcards() async {
+        let found = await names("*.zip")
+        XCTAssertEqual(found, ["bundle.zip"])
+    }
+}

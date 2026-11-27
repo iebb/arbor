@@ -39,7 +39,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         didFinishLaunching = true
         if pendingOpenURLs.isEmpty {
-            openWindow(startLocationFromArguments() ?? Preferences.shared.startLocation.location)
+            if let start = startLocationFromArguments() {
+                openWindow(start)
+            } else if !restoreSavedWindows() {
+                openWindow(Preferences.shared.startLocation.location)
+            }
         } else {
             open(pendingOpenURLs)
             pendingOpenURLs = []
@@ -61,6 +65,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        saveWindows()
+    }
+
+    // MARK: Restore previous folder windows
+
+    private static let savedWindowsKey = "SavedWindows"
+
+    /// Each window as its tabs' locations, in tab order ("This Mac" or a folder path).
+    private func saveWindows() {
+        var seen = Set<ObjectIdentifier>()
+        var saved: [[String]] = []
+        for window in NSApp.orderedWindows where window.windowController is BrowserWindowController {
+            let group = window.tabbedWindows ?? [window]
+            guard !group.contains(where: { seen.contains(ObjectIdentifier($0)) }) else { continue }
+            group.forEach { seen.insert(ObjectIdentifier($0)) }
+            let tabs: [String] = group.compactMap { tab in
+                guard let browser = (tab.windowController as? BrowserWindowController)?.browser else { return nil }
+                switch browser.location {
+                case .thisMac: return "thisMac"
+                case .folder(let url): return url.pathKey
+                case .search(let root, _): return root.pathKey
+                }
+            }
+            if !tabs.isEmpty { saved.append(tabs) }
+        }
+        UserDefaults.standard.set(saved, forKey: Self.savedWindowsKey)
+    }
+
+    /// "Restore previous folder windows at launch". Returns false when there was nothing to restore.
+    private func restoreSavedWindows() -> Bool {
+        guard Preferences.shared[.restoreWindowsAtLaunch],
+              let saved = UserDefaults.standard.array(forKey: Self.savedWindowsKey) as? [[String]] else { return false }
+        var restored = false
+        for tabs in saved.reversed() {
+            let locations: [Location] = tabs.compactMap { entry in
+                if entry == "thisMac" { return .thisMac }
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: entry, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+                return .folder(URL(fileURLWithPath: entry, isDirectory: true))
+            }
+            guard let first = locations.first else { continue }
+            let window = openWindow(first).window
+            for location in locations.dropFirst() { openTab(location, from: window) }
+            restored = true
+        }
+        return restored
+    }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
 
@@ -136,8 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showSettings(_ sender: Any?) {
         if settingsController == nil { settingsController = SettingsWindowController() }
-        settingsController?.showWindow(nil)
-        settingsController?.window?.makeKeyAndOrderFront(nil)
+        settingsController?.present()
     }
 
     @objc func showHelp(_ sender: Any?) {

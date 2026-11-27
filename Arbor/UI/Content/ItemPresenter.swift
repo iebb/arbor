@@ -7,9 +7,135 @@ struct PresentationContext {
     var isSearch: Bool
     var viewMode: ViewMode
     var sort: SortOrder
+    var display = DisplayOptions()
 
     func isDimmed(_ item: FileItem) -> Bool {
         item.isHidden || cutPaths.contains(item.url.pathKey)
+    }
+}
+
+/// Folder Options that change how items look and respond to the mouse.
+struct DisplayOptions: Equatable {
+    var singleClickToOpen = false
+    var underlineOnlyOnHover = true
+    var checkBoxes = false
+    var compact = false
+    var popUpDescriptions = true
+    var folderTipSize = true
+    var alwaysShowIcons = false
+    var fileIconOnThumbnails = true
+
+    static var current: DisplayOptions {
+        let prefs = Preferences.shared
+        return DisplayOptions(
+            singleClickToOpen: prefs[.singleClickToOpen],
+            underlineOnlyOnHover: prefs[.underlineOnlyOnHover],
+            checkBoxes: prefs[.itemCheckBoxes],
+            compact: prefs[.compactView],
+            popUpDescriptions: prefs[.popUpDescriptions],
+            folderTipSize: prefs[.folderTipSize],
+            alwaysShowIcons: prefs[.alwaysShowIcons],
+            fileIconOnThumbnails: prefs[.fileIconOnThumbnails]
+        )
+    }
+
+    /// Single-click mode underlines titles, always or only under the pointer.
+    func underlines(hovered: Bool) -> Bool {
+        singleClickToOpen && (!underlineOnlyOnHover || hovered)
+    }
+
+    /// Check boxes show on selected items and the item under the pointer, like Explorer.
+    func showsCheckBox(selected: Bool, hovered: Bool) -> Bool {
+        checkBoxes && (selected || hovered)
+    }
+
+    func toolTip(for item: FileItem) -> String? {
+        popUpDescriptions ? ItemToolTip.text(for: item, includeFolderSize: folderTipSize) : nil
+    }
+}
+
+/// The text of Explorer's item pop-ups ("Type / Size / Date modified", or a folder's contents).
+enum ItemToolTip {
+    static func text(for item: FileItem, includeFolderSize: Bool) -> String {
+        guard let folder = item.folderURL else {
+            return "Type: \(item.kind)\nSize: \(Format.bytes(item.size ?? 0))\nDate modified: \(Format.date(item.modified))"
+        }
+        var lines = ["Date created: \(Format.date(item.created))"]
+        if includeFolderSize, let size = folderSize(folder) {
+            lines.append("Size: \(size.complete ? "" : "more than ")\(Format.bytes(size.bytes))")
+        }
+        let children = ((try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? [])
+            .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        if children.isEmpty {
+            lines.append("Empty folder")
+        } else {
+            let isDir: (URL) -> Bool = { (try? $0.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true }
+            let folders = children.filter(isDir).map(\.lastPathComponent)
+            let files = children.filter { !isDir($0) }.map(\.lastPathComponent)
+            if !folders.isEmpty { lines.append("Folders: " + summary(folders)) }
+            if !files.isEmpty { lines.append("Files: " + summary(files)) }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func summary(_ names: [String]) -> String {
+        names.count > 4 ? names.prefix(4).joined(separator: ", ") + ", …" : names.joined(separator: ", ")
+    }
+
+    /// Adds up a folder's size, giving up after a short time so the pop-up never stalls.
+    static func folderSize(_ url: URL, budget: TimeInterval = 0.25) -> (bytes: Int64, complete: Bool)? {
+        let started = Date()
+        var total: Int64 = 0
+        guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.fileSizeKey], options: [], errorHandler: { _, _ in true }) else { return nil }
+        while let child = enumerator.nextObject() as? URL {
+            total += Int64((try? child.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+            if Date().timeIntervalSince(started) > budget { return (total, false) }
+        }
+        return (total, true)
+    }
+}
+
+/// Supplies a view's tool tip only when it's about to be shown (folder tips are costly to build).
+final class LazyToolTip: NSObject, NSViewToolTipOwner {
+    var provider: (() -> String?)?
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint, userData data: UnsafeMutableRawPointer?) -> String {
+        provider?() ?? ""
+    }
+
+    func install(on view: NSView) {
+        view.removeAllToolTips()
+        if provider != nil { view.addToolTip(view.bounds, owner: self, userData: nil) }
+    }
+}
+
+/// An item title, underlined in single-click mode (always plain text attributes, so underline never sticks).
+func itemTitle(_ text: String, underline: Bool, font: NSFont, alignment: NSTextAlignment = .left, lineBreak: NSLineBreakMode = .byTruncatingTail) -> NSAttributedString {
+    let style = NSMutableParagraphStyle()
+    style.alignment = alignment
+    style.lineBreakMode = lineBreak
+    var attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: NSColor.labelColor, .paragraphStyle: style]
+    if underline { attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue }
+    return NSAttributedString(string: text, attributes: attributes)
+}
+
+/// Hover-to-select for single-click mode ("point to select"): selects the item under the pointer after a pause.
+final class PointToSelect {
+    private var pending: DispatchWorkItem?
+
+    func schedule(_ action: @escaping () -> Void) {
+        cancel()
+        let work = DispatchWorkItem {
+            guard NSEvent.pressedMouseButtons == 0 else { return }
+            action()
+        }
+        pending = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    func cancel() {
+        pending?.cancel()
+        pending = nil
     }
 }
 

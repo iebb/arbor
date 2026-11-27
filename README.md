@@ -48,9 +48,24 @@ header to show or hide columns; drag to reorder and resize. Natural sort ("file2
 - Compress to ZIP, Extract All, Copy as path, Open with ▸, Share ▸, Open in Terminal, Show in Finder,
   Pin to Quick access, Eject, **Properties** (size on disk, contents, dates, Read-only and Hidden).
 
-**Folder Options** (⌘,) — start folder, Backspace behaviour, show hidden items, hide known
-extensions, expand to open folder, Apply to Folders / Reset Folders, and an opt-in
-"Use Arbor to Open Folders" (with "Restore Finder").
+**Folder Options** (⌘, or ⋯ › Options) — a copy of Explorer's dialog, with OK / Cancel / Apply and
+Restore Defaults on each tab:
+- *General* — Open Arbor to (Home, This Mac, iCloud Drive…); open each folder in the same window or
+  its own window; single-click to open (point to select, with underlined titles) or double-click;
+  Privacy: recently used files (Go › Recent Files), frequently used folders (in the navigation pane),
+  Clear history; plus an opt-in "Use Arbor to Open Folders" / "Restore Finder".
+- *View* — Apply to Folders / Reset Folders, and the Advanced settings list: always show icons,
+  file icon on thumbnails, size in folder tips, full path in the title bar, hidden files, hide empty
+  drives, **hide extensions for known file types**, hide protected operating system files (with
+  Explorer's warning), restore previous folder windows at launch, pop-up descriptions, preview
+  handlers, status bar, Backspace behaviour, item check boxes, typing into the search box or
+  selecting the typed item, expand to open folder, and Show This Mac.
+- *Search* — include system directories, include compressed (ZIP) files, and search file contents.
+
+Explorer options that have no macOS equivalent are left out: libraries, drive letters, NTFS
+colours, the Sharing Wizard, separate processes, sync provider notifications, Office.com files and
+the search index. View › Show also has Compact view, Item check boxes, File name extensions and
+Hidden items, as in Explorer's View menu.
 
 ## Keyboard shortcuts
 

@@ -77,6 +77,15 @@ extension BrowserViewController {
             }
             if inContent, flags.isSubset(of: [.shift]), let characters = event.characters, !characters.isEmpty,
                characters.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.union(.punctuationCharacters).contains($0) }) {
+                // "When typing into list view: Automatically type into the Search Box".
+                if Preferences.shared[.typeIntoSearchBox], location.scopeURL != nil {
+                    addressBar.focusSearch()
+                    if let editor = addressBar.searchField.currentEditor() as? NSTextView {
+                        editor.selectedRange = NSRange(location: (editor.string as NSString).length, length: 0)
+                        editor.insertText(characters, replacementRange: editor.selectedRange)
+                    }
+                    return true
+                }
                 lastTypeSelect = Date()
             }
             return false

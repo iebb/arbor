@@ -12,6 +12,8 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
     private var renameCancelled = false
     /// A reload that arrived mid-rename; applied when editing ends so the edit isn't destroyed.
     private var deferredShow: (items: [FileItem], context: PresentationContext)?
+    private var hoveredIndex = -1
+    private let pointToSelect = PointToSelect()
 
     struct Metrics {
         let iconSize: CGFloat
@@ -57,6 +59,12 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
             return self.delegate?.presenter(self, menuFor: self.selectedItems)
         }
         collectionView.typeSelectHandler = { [weak self] prefix in self?.typeSelect(prefix) }
+        collectionView.isSingleClickMode = { [weak self] in self?.context.display.singleClickToOpen ?? false }
+        collectionView.onSingleClickOpen = { [weak self] indexPath in
+            guard let self, self.items.indices.contains(indexPath.item) else { return }
+            self.delegate?.presenter(self, open: [self.items[indexPath.item]])
+        }
+        collectionView.onHover = { [weak self] index in self?.hoverChanged(index) }
 
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
         scroll.documentView = collectionView
@@ -75,6 +83,9 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
 
     private func apply(_ mode: ViewMode) {
         let metrics = Self.metrics(for: mode)
+        let spacing: CGFloat = context.display.compact ? 0 : 4
+        layout.minimumInteritemSpacing = spacing
+        layout.minimumLineSpacing = spacing
         layout.itemSize = metrics.itemSize
         layout.scrollDirection = metrics.horizontal ? .horizontal : .vertical
         collectionView.reloadData()
@@ -104,7 +115,9 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         deferredShow = nil
         let previouslySelected = Set(selectedItems.map(\.url.pathKey))
         items = newItems
+        let compactChanged = context.display.compact != newContext.display.compact
         context = newContext
+        if compactChanged { apply(mode) }
         collectionView.reloadData()
         let paths = items.indices.filter { previouslySelected.contains(items[$0].url.pathKey) }.map { IndexPath(item: $0, section: 0) }
         collectionView.selectionIndexPaths = Set(paths)
@@ -118,6 +131,28 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
             if let index = collectionView.indexPath(for: item)?.item, items.indices.contains(index) {
                 configure(item, with: items[index])
             }
+        }
+    }
+
+    // MARK: Hover
+
+    private func hoverChanged(_ index: Int) {
+        guard index != hoveredIndex else { return }
+        let old = hoveredIndex
+        hoveredIndex = index
+        for i in [old, index] where i >= 0 {
+            (collectionView.item(at: IndexPath(item: i, section: 0)) as? IconItem)?.itemView.isHovered = i == index
+        }
+        guard context.display.singleClickToOpen, index >= 0, renamingURL == nil else { return pointToSelect.cancel() }
+        pointToSelect.schedule { [weak self] in
+            guard let self, self.hoveredIndex == index, self.renamingURL == nil, self.items.indices.contains(index) else { return }
+            let path = IndexPath(item: index, section: 0)
+            if NSEvent.modifierFlags.contains(.command) {
+                self.collectionView.selectionIndexPaths.insert(path)
+            } else if self.collectionView.selectionIndexPaths != [path] {
+                self.collectionView.selectionIndexPaths = [path]
+            }
+            self.delegate?.presenterSelectionDidChange(self)
         }
     }
 
@@ -176,6 +211,8 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         let field = item.itemView.titleField
         renamingURL = items[index].url
         renameCancelled = false
+        pointToSelect.cancel()
+        field.stringValue = items[index].displayName(showExtensions: context.showExtensions)
         field.delegate = self
         item.itemView.setEditing(true)
         view.window?.makeFirstResponder(field)
@@ -238,21 +275,41 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         view.style = metrics.style
         view.iconSize = metrics.iconSize
         view.representedURL = file.url
-        view.titleField.stringValue = file.displayName(showExtensions: context.showExtensions)
+        let display = context.display
+        view.display = display
+        view.title = file.displayName(showExtensions: context.showExtensions)
         view.detailField.stringValue = file.kind
         view.secondDetailField.stringValue = file.isFolder ? "" : Format.bytes(file.size ?? 0)
         view.alphaValue = context.isDimmed(file) ? 0.5 : 1
         view.imageView.image = IconCache.icon(for: file.url)
-        view.toolTip = file.name
+        view.badgeView.image = nil
+        view.toolTipSource.provider = display.popUpDescriptions ? { display.toolTip(for: file) } : nil
+        view.toolTipSource.install(on: view)
+        view.isHovered = collectionView.indexPath(for: item)?.item == hoveredIndex
+        item.onToggle = { [weak self, weak item] in
+            guard let self, let item, let path = self.collectionView.indexPath(for: item) else { return }
+            if self.collectionView.selectionIndexPaths.contains(path) {
+                self.collectionView.selectionIndexPaths.remove(path)
+            } else {
+                self.collectionView.selectionIndexPaths.insert(path)
+            }
+            item.isSelected = self.collectionView.selectionIndexPaths.contains(path)
+            self.delegate?.presenterSelectionDidChange(self)
+        }
 
-        guard metrics.iconSize >= 48, ThumbnailProvider.wantsThumbnail(file) else { return }
+        // "Always show icons, never thumbnails" turns previews off; otherwise media gets a thumbnail,
+        // optionally badged with the app icon ("Display file icon on thumbnails").
+        guard metrics.iconSize >= 48, !display.alwaysShowIcons, ThumbnailProvider.wantsThumbnail(file) else { return }
+        let badge = display.fileIconOnThumbnails ? NSWorkspace.shared.urlForApplication(toOpen: file.url).map { NSWorkspace.shared.icon(forFile: $0.path) } : nil
         if let thumbnail = ThumbnailProvider.shared.cachedThumbnail(for: file.url, size: metrics.iconSize) {
             view.imageView.image = thumbnail
+            view.badgeView.image = badge
         } else {
             let scale = self.view.window?.backingScaleFactor ?? 2
             ThumbnailProvider.shared.requestThumbnail(for: file.url, size: metrics.iconSize, scale: scale) { [weak view] image in
                 guard let view, view.representedURL?.isSameItem(as: file.url) == true else { return }
                 view.imageView.image = image
+                view.badgeView.image = badge
             }
         }
     }
@@ -301,14 +358,43 @@ final class ExplorerCollectionView: NSCollectionView {
     var onDoubleClick: ((IndexPath) -> Void)?
     var menuProvider: (() -> NSMenu?)?
     var typeSelectHandler: ((String) -> Void)?
+    var onSingleClickOpen: ((IndexPath) -> Void)?
+    var onHover: ((Int) -> Void)?
+    var isSingleClickMode: () -> Bool = { false }
     private var typed = ""
     private var lastTyped = Date.distantPast
+    private var hoverArea: NSTrackingArea?
 
     override func mouseDown(with event: NSEvent) {
+        let singleClickMode = isSingleClickMode()
+        let start = NSEvent.mouseLocation
+        let path = indexPathForItem(at: convert(event.locationInWindow, from: nil))
         super.mouseDown(with: event)
-        if event.clickCount == 2, let path = indexPathForItem(at: convert(event.locationInWindow, from: nil)) {
+        let plain = event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty
+        if singleClickMode {
+            let end = NSEvent.mouseLocation
+            if plain, event.clickCount == 1, let path, hypot(end.x - start.x, end.y - start.y) < 4 { onSingleClickOpen?(path) }
+        } else if event.clickCount == 2, let path {
             onDoubleClick?(path)
         }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        onHover?(indexPathForItem(at: convert(event.locationInWindow, from: nil))?.item ?? -1)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        onHover?(-1)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -354,6 +440,10 @@ final class ExplorerCollectionView: NSCollectionView {
 final class IconItem: NSCollectionViewItem {
     static let identifier = NSUserInterfaceItemIdentifier("IconItem")
     var itemView: IconItemView { view as! IconItemView }
+    var onToggle: (() -> Void)? {
+        get { itemView.onToggle }
+        set { itemView.onToggle = newValue }
+    }
 
     override func loadView() {
         view = IconItemView(frame: NSRect(x: 0, y: 0, width: 120, height: 140))
@@ -375,8 +465,16 @@ final class IconItemView: NSView {
     var style: Style = .grid { didSet { applyStyle(); needsLayout = true } }
     var iconSize: CGFloat = 96 { didSet { needsLayout = true } }
     var representedURL: URL?
-    var isSelected = false { didSet { needsDisplay = true } }
+    var isSelected = false { didSet { needsDisplay = true; updateDecorations() } }
     var isHighlighted = false { didSet { needsDisplay = true } }
+    var isHovered = false { didSet { if oldValue != isHovered { updateDecorations() } } }
+    var display = DisplayOptions() { didSet { updateDecorations(); if oldValue.checkBoxes != display.checkBoxes { needsLayout = true } } }
+    var title = "" { didSet { updateDecorations() } }
+    var onToggle: (() -> Void)?
+    let toolTipSource = LazyToolTip()
+    let checkBox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    /// The app icon drawn on a thumbnail's corner ("Display file icon on thumbnails").
+    let badgeView = NSImageView()
 
     let imageView = NSImageView()
     let titleField = NSTextField(wrappingLabelWithString: "")
@@ -389,11 +487,31 @@ final class IconItemView: NSView {
         titleField.font = .systemFont(ofSize: 12)
         titleField.isSelectable = false
         titleField.cell?.truncatesLastVisibleLine = true
-        for view in [imageView, titleField, detailField, secondDetailField] {
+        for view in [imageView, badgeView, titleField, detailField, secondDetailField, checkBox] {
             view.translatesAutoresizingMaskIntoConstraints = true
             addSubview(view)
         }
+        badgeView.imageScaling = .scaleProportionallyUpOrDown
+        checkBox.target = self
+        checkBox.action = #selector(toggled)
+        checkBox.isHidden = true
         applyStyle()
+    }
+
+    @objc private func toggled() { onToggle?() }
+
+    private func updateDecorations() {
+        guard !titleField.isEditable else { return }
+        let grid = style == .grid
+        titleField.attributedStringValue = itemTitle(
+            title,
+            underline: display.underlines(hovered: isHovered),
+            font: .systemFont(ofSize: 12),
+            alignment: grid ? .center : .left,
+            lineBreak: grid ? .byWordWrapping : .byTruncatingTail
+        )
+        checkBox.isHidden = !display.showsCheckBox(selected: isSelected, hovered: isHovered)
+        checkBox.state = isSelected ? .on : .off
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -419,10 +537,21 @@ final class IconItemView: NSView {
         titleField.drawsBackground = editing
         titleField.backgroundColor = editing ? .textBackgroundColor : .clear
         titleField.isBordered = editing
+        if !editing { updateDecorations() }
     }
 
     override func layout() {
         super.layout()
+        // Row and tile layouts keep a column for the check box so icons don't jump.
+        let boxColumn: CGFloat = display.checkBoxes && style != .grid ? 20 : 0
+        defer {
+            checkBox.frame = style == .grid
+                ? NSRect(x: 2, y: bounds.height - 20, width: 18, height: 18)
+                : NSRect(x: 2, y: (bounds.height - 18) / 2, width: 18, height: 18)
+            let badge = min(32, imageView.frame.width * 0.38)
+            badgeView.frame = NSRect(x: imageView.frame.maxX - badge, y: imageView.frame.minY, width: badge, height: badge)
+            toolTipSource.install(on: self)
+        }
         let b = bounds
         switch style {
         case .grid:
@@ -430,11 +559,11 @@ final class IconItemView: NSView {
             imageView.frame = NSRect(x: (b.width - icon) / 2, y: b.height - icon - 6, width: icon, height: icon)
             titleField.frame = NSRect(x: 4, y: 2, width: b.width - 8, height: max(0, b.height - icon - 12))
         case .row:
-            imageView.frame = NSRect(x: 4, y: (b.height - iconSize) / 2, width: iconSize, height: iconSize)
-            titleField.frame = NSRect(x: iconSize + 10, y: (b.height - 17) / 2, width: b.width - iconSize - 14, height: 17)
+            imageView.frame = NSRect(x: 4 + boxColumn, y: (b.height - iconSize) / 2, width: iconSize, height: iconSize)
+            titleField.frame = NSRect(x: iconSize + 10 + boxColumn, y: (b.height - 17) / 2, width: b.width - iconSize - 14 - boxColumn, height: 17)
         case .tile:
-            imageView.frame = NSRect(x: 6, y: (b.height - iconSize) / 2, width: iconSize, height: iconSize)
-            let x = iconSize + 14
+            imageView.frame = NSRect(x: 6 + boxColumn, y: (b.height - iconSize) / 2, width: iconSize, height: iconSize)
+            let x = iconSize + 14 + boxColumn
             let width = b.width - x - 6
             titleField.frame = NSRect(x: x, y: b.height / 2 + 6, width: width, height: 17)
             detailField.frame = NSRect(x: x, y: b.height / 2 - 10, width: width, height: 15)

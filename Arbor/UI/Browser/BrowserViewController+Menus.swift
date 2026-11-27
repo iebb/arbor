@@ -159,11 +159,18 @@ extension BrowserViewController {
         menu.addItem(.separator())
         let show = NSMenuItem(title: "Show", action: nil, keyEquivalent: "")
         let showMenu = NSMenu()
+        let compact = menuItem("Compact view", #selector(toggleOption(_:)))
+        compact.representedObject = FolderOption.compactView.rawValue
+        showMenu.addItem(compact)
         showMenu.addItem(menuItem("Navigation pane", #selector(toggleNavigationPane(_:))))
         showMenu.addItem(menuItem("Preview pane", #selector(togglePreviewPane(_:)), key: "p", modifiers: [.option]))
         showMenu.addItem(.separator())
+        let checkBoxes = menuItem("Item check boxes", #selector(toggleOption(_:)))
+        checkBoxes.representedObject = FolderOption.itemCheckBoxes.rawValue
+        showMenu.addItem(checkBoxes)
         showMenu.addItem(menuItem("File name extensions", #selector(toggleFileExtensions(_:))))
         showMenu.addItem(menuItem("Hidden items", #selector(toggleHiddenItems(_:)), key: ".", modifiers: [.command, .shift]))
+        show.image = NSImage.symbol("eye")
         show.submenu = showMenu
         menu.addItem(show)
         return menu
@@ -267,7 +274,7 @@ extension BrowserViewController {
         var entries: [(String, URL)] = []
         switch location {
         case .thisMac:
-            entries = VolumeService.mountedVolumes().map { ($0.name, $0.url) }
+            entries = VolumeService.visibleVolumes().map { ($0.name, $0.url) }
         case .folder(let url):
             let showHidden = Preferences.shared.showHidden
             let options: FileManager.DirectoryEnumerationOptions = showHidden ? [] : [.skipsHiddenFiles]

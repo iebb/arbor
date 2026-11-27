@@ -7,19 +7,31 @@ extension Notification.Name {
     static let arborFoldersChanged = Notification.Name("ArborFoldersChanged")
     static let arborClipboardChanged = Notification.Name("ArborClipboardChanged")
     static let arborVolumesChanged = Notification.Name("ArborVolumesChanged")
+    static let arborRecentsChanged = Notification.Name("ArborRecentsChanged")
 }
 
 enum StartLocation: String, CaseIterable {
-    case home, thisMac, desktop, documents, downloads
+    case home, thisMac, iCloudDrive, desktop, documents, downloads
 
     var title: String {
         switch self {
         case .home: return "Home"
         case .thisMac: return "This Mac"
+        case .iCloudDrive: return "iCloud Drive"
         case .desktop: return "Desktop"
         case .documents: return "Documents"
         case .downloads: return "Downloads"
         }
+    }
+
+    /// The choices Folder Options offers (iCloud Drive only when it's set up).
+    static var available: [StartLocation] {
+        allCases.filter { $0 != .iCloudDrive || FileManager.default.fileExists(atPath: Self.iCloudURL.path) }
+    }
+
+    static var iCloudURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Mobile Documents/com~apple~CloudDocs", isDirectory: true)
     }
 
     var location: Location {
@@ -30,6 +42,8 @@ enum StartLocation: String, CaseIterable {
         switch self {
         case .home: return .home
         case .thisMac: return .thisMac
+        case .iCloudDrive:
+            return FileManager.default.fileExists(atPath: Self.iCloudURL.path) ? .folder(Self.iCloudURL.normalizedFolder) : .home
         case .desktop: return user(.desktopDirectory)
         case .documents: return user(.documentDirectory)
         case .downloads: return user(.downloadsDirectory)
@@ -37,90 +51,138 @@ enum StartLocation: String, CaseIterable {
     }
 }
 
+/// Every on/off setting, mostly Explorer's Folder Options. The raw value is the UserDefaults key.
+enum FolderOption: String, CaseIterable {
+    // General
+    case openFoldersInNewWindow = "OpenFoldersInNewWindow"
+    case singleClickToOpen = "SingleClickToOpen"
+    case underlineOnlyOnHover = "UnderlineOnlyOnHover"
+    case showRecentFiles = "ShowRecentFiles"
+    case showFrequentFolders = "ShowFrequentFolders"
+    // View › Files and Folders
+    case alwaysShowIcons = "AlwaysShowIcons"
+    case fileIconOnThumbnails = "FileIconOnThumbnails"
+    case folderTipSize = "FolderTipSize"
+    case fullPathInTitleBar = "FullPathInTitleBar"
+    case showHidden = "ShowHiddenItems"
+    case hideEmptyDrives = "HideEmptyDrives"
+    case showExtensions = "ShowFileNameExtensions"
+    case hideProtectedSystemFiles = "HideProtectedSystemFiles"
+    case restoreWindowsAtLaunch = "RestoreWindowsAtLaunch"
+    case popUpDescriptions = "PopUpDescriptions"
+    case previewHandlers = "PreviewHandlers"
+    case showStatusBar = "ShowStatusBar"
+    case itemCheckBoxes = "ItemCheckBoxes"
+    case backspaceGoesBack = "BackspaceGoesBack"
+    case typeIntoSearchBox = "TypeIntoSearchBox"
+    // View › Navigation pane
+    case expandToOpenFolder = "ExpandToOpenFolder"
+    case showThisMac = "ShowThisMacInTree"
+    // Search
+    case searchSystemDirectories = "SearchSystemDirectories"
+    case searchCompressedFiles = "SearchCompressedFiles"
+    case searchFileContents = "SearchFileContents"
+    // View menu (not in the dialog)
+    case compactView = "CompactView"
+    case showNavigationPane = "ShowNavigationPane"
+    case showPreviewPane = "ShowPreviewPane"
+
+    var defaultValue: Bool {
+        switch self {
+        case .underlineOnlyOnHover, .showRecentFiles, .showFrequentFolders, .fileIconOnThumbnails, .folderTipSize,
+             .hideEmptyDrives, .hideProtectedSystemFiles, .popUpDescriptions, .previewHandlers, .showStatusBar,
+             .backspaceGoesBack, .expandToOpenFolder, .showThisMac, .searchSystemDirectories, .showNavigationPane:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Pane visibility is window layout, not a setting other views react to.
+    var postsChange: Bool { self != .showNavigationPane && self != .showPreviewPane }
+
+    static let generalTab: [FolderOption] = [.openFoldersInNewWindow, .singleClickToOpen, .underlineOnlyOnHover, .showRecentFiles, .showFrequentFolders]
+    static let viewTab: [FolderOption] = [
+        .alwaysShowIcons, .fileIconOnThumbnails, .folderTipSize, .fullPathInTitleBar, .showHidden, .hideEmptyDrives,
+        .showExtensions, .hideProtectedSystemFiles, .restoreWindowsAtLaunch, .popUpDescriptions, .previewHandlers,
+        .showStatusBar, .itemCheckBoxes, .backspaceGoesBack, .typeIntoSearchBox, .expandToOpenFolder, .showThisMac,
+    ]
+    static let searchTab: [FolderOption] = [.searchSystemDirectories, .searchCompressedFiles, .searchFileContents]
+}
+
 /// App-wide settings, the equivalent of Explorer's "Folder Options".
 final class Preferences {
     static let shared = Preferences()
     private let defaults = UserDefaults.standard
-
-    private enum Key {
-        static let showHidden = "ShowHiddenItems"
-        static let showExtensions = "ShowFileNameExtensions"
-        static let expandToOpenFolder = "ExpandToOpenFolder"
-        static let backspaceGoesBack = "BackspaceGoesBack"
-        static let startLocation = "StartLocation"
-        static let showPreviewPane = "ShowPreviewPane"
-        static let showNavigationPane = "ShowNavigationPane"
-        static let defaultViewMode = "DefaultViewMode"
-        static let defaultSortKey = "DefaultSortKey"
-        static let defaultSortAscending = "DefaultSortAscending"
-        static let pinned = "PinnedFolders"
-    }
+    private static let startLocationKey = "StartLocation"
+    private static let pinnedKey = "PinnedFolders"
+    private static let defaultViewModeKey = "DefaultViewMode"
+    private static let defaultSortKeyKey = "DefaultSortKey"
+    private static let defaultSortAscendingKey = "DefaultSortAscending"
 
     private init() {
-        defaults.register(defaults: [
-            Key.showHidden: false,
-            Key.showExtensions: false,
-            Key.expandToOpenFolder: true,
-            Key.backspaceGoesBack: true,
-            Key.startLocation: StartLocation.home.rawValue,
-            Key.showPreviewPane: false,
-            Key.showNavigationPane: true,
-            Key.defaultViewMode: ViewMode.details.rawValue,
-            Key.defaultSortKey: SortKey.name.rawValue,
-            Key.defaultSortAscending: true,
-        ])
+        var registered: [String: Any] = [
+            Self.startLocationKey: StartLocation.home.rawValue,
+            Self.defaultViewModeKey: ViewMode.details.rawValue,
+            Self.defaultSortKeyKey: SortKey.name.rawValue,
+            Self.defaultSortAscendingKey: true,
+        ]
+        for option in FolderOption.allCases { registered[option.rawValue] = option.defaultValue }
+        defaults.register(defaults: registered)
     }
 
     private func changed() {
         NotificationCenter.default.post(name: .arborPreferencesChanged, object: self)
     }
 
-    var showHidden: Bool {
-        get { defaults.bool(forKey: Key.showHidden) }
-        set { defaults.set(newValue, forKey: Key.showHidden); changed() }
+    subscript(option: FolderOption) -> Bool {
+        get { defaults.bool(forKey: option.rawValue) }
+        set {
+            guard newValue != self[option] else { return }
+            defaults.set(newValue, forKey: option.rawValue)
+            if option.postsChange { changed() }
+        }
     }
 
-    var showExtensions: Bool {
-        get { defaults.bool(forKey: Key.showExtensions) }
-        set { defaults.set(newValue, forKey: Key.showExtensions); changed() }
+    /// Applies several settings at once with a single change notification (Folder Options' Apply/OK).
+    func apply(_ values: [FolderOption: Bool], startLocation newStart: StartLocation? = nil) {
+        var didChange = false
+        for (option, value) in values where self[option] != value {
+            defaults.set(value, forKey: option.rawValue)
+            didChange = didChange || option.postsChange
+        }
+        if let newStart, newStart != startLocation {
+            defaults.set(newStart.rawValue, forKey: Self.startLocationKey)
+            didChange = true
+        }
+        if didChange { changed() }
     }
 
-    var expandToOpenFolder: Bool {
-        get { defaults.bool(forKey: Key.expandToOpenFolder) }
-        set { defaults.set(newValue, forKey: Key.expandToOpenFolder); changed() }
-    }
+    func toggle(_ option: FolderOption) { self[option].toggle() }
 
-    /// Explorer: Backspace goes back. Off: Backspace moves the selection to the Trash (Finder habit).
-    var backspaceGoesBack: Bool {
-        get { defaults.bool(forKey: Key.backspaceGoesBack) }
-        set { defaults.set(newValue, forKey: Key.backspaceGoesBack); changed() }
-    }
+    // Shorthand for the settings read most often.
+    var showHidden: Bool { get { self[.showHidden] } set { self[.showHidden] = newValue } }
+    var showExtensions: Bool { get { self[.showExtensions] } set { self[.showExtensions] = newValue } }
+    var expandToOpenFolder: Bool { self[.expandToOpenFolder] }
+    var backspaceGoesBack: Bool { self[.backspaceGoesBack] }
+    var showPreviewPane: Bool { get { self[.showPreviewPane] } set { self[.showPreviewPane] = newValue } }
+    var showNavigationPane: Bool { get { self[.showNavigationPane] } set { self[.showNavigationPane] = newValue } }
 
     var startLocation: StartLocation {
-        get { StartLocation(rawValue: defaults.string(forKey: Key.startLocation) ?? "") ?? .home }
-        set { defaults.set(newValue.rawValue, forKey: Key.startLocation); changed() }
-    }
-
-    var showPreviewPane: Bool {
-        get { defaults.bool(forKey: Key.showPreviewPane) }
-        set { defaults.set(newValue, forKey: Key.showPreviewPane) }
-    }
-
-    var showNavigationPane: Bool {
-        get { defaults.bool(forKey: Key.showNavigationPane) }
-        set { defaults.set(newValue, forKey: Key.showNavigationPane) }
+        get { StartLocation(rawValue: defaults.string(forKey: Self.startLocationKey) ?? "") ?? .home }
+        set { defaults.set(newValue.rawValue, forKey: Self.startLocationKey); changed() }
     }
 
     var defaultViewSettings: FolderViewSettings {
         get {
-            let mode = ViewMode(rawValue: defaults.string(forKey: Key.defaultViewMode) ?? "") ?? .details
-            let key = SortKey(rawValue: defaults.string(forKey: Key.defaultSortKey) ?? "") ?? .name
-            return FolderViewSettings(viewMode: mode, sort: SortOrder(key: key, ascending: defaults.bool(forKey: Key.defaultSortAscending)))
+            let mode = ViewMode(rawValue: defaults.string(forKey: Self.defaultViewModeKey) ?? "") ?? .details
+            let key = SortKey(rawValue: defaults.string(forKey: Self.defaultSortKeyKey) ?? "") ?? .name
+            return FolderViewSettings(viewMode: mode, sort: SortOrder(key: key, ascending: defaults.bool(forKey: Self.defaultSortAscendingKey)))
         }
         set {
-            defaults.set(newValue.viewMode.rawValue, forKey: Key.defaultViewMode)
-            defaults.set(newValue.sort.key.rawValue, forKey: Key.defaultSortKey)
-            defaults.set(newValue.sort.ascending, forKey: Key.defaultSortAscending)
+            defaults.set(newValue.viewMode.rawValue, forKey: Self.defaultViewModeKey)
+            defaults.set(newValue.sort.key.rawValue, forKey: Self.defaultSortKeyKey)
+            defaults.set(newValue.sort.ascending, forKey: Self.defaultSortAscendingKey)
         }
     }
 
@@ -128,11 +190,11 @@ final class Preferences {
 
     var pinnedFolders: [URL] {
         get {
-            guard let paths = defaults.stringArray(forKey: Key.pinned) else { return Preferences.defaultPins }
+            guard let paths = defaults.stringArray(forKey: Self.pinnedKey) else { return Preferences.defaultPins }
             return paths.map { URL(fileURLWithPath: $0, isDirectory: true) }
         }
         set {
-            defaults.set(newValue.map(\.pathKey), forKey: Key.pinned)
+            defaults.set(newValue.map(\.pathKey), forKey: Self.pinnedKey)
             NotificationCenter.default.post(name: .arborPinsChanged, object: self)
         }
     }
@@ -201,5 +263,63 @@ final class FolderViewStore {
         case .folder(let url): return url.pathKey
         case .search: return "search:"
         }
+    }
+}
+
+/// Explorer's history for the Privacy options: frequently used folders and recently used files.
+final class RecentItems {
+    static let shared = RecentItems()
+    private let foldersKey = "FrequentFolderCounts"
+    private let filesKey = "RecentFiles"
+    private var folderCounts: [String: Int]
+    private var files: [String]
+
+    private init() {
+        folderCounts = UserDefaults.standard.dictionary(forKey: foldersKey) as? [String: Int] ?? [:]
+        files = UserDefaults.standard.stringArray(forKey: filesKey) ?? []
+    }
+
+    func recordFolderVisit(_ url: URL) {
+        let before = frequentFolders()
+        folderCounts[url.pathKey, default: 0] += 1
+        if folderCounts.count > 500 {
+            // Forget the least-used folders.
+            for (key, _) in folderCounts.sorted(by: { $0.value < $1.value }).prefix(100) { folderCounts.removeValue(forKey: key) }
+        }
+        UserDefaults.standard.set(folderCounts, forKey: foldersKey)
+        if frequentFolders() != before { NotificationCenter.default.post(name: .arborRecentsChanged, object: self) }
+    }
+
+    func recordFileOpen(_ url: URL) {
+        files.removeAll { $0 == url.pathKey }
+        files.insert(url.pathKey, at: 0)
+        files = Array(files.prefix(20))
+        UserDefaults.standard.set(files, forKey: filesKey)
+        NotificationCenter.default.post(name: .arborRecentsChanged, object: self)
+    }
+
+    /// Folders visited at least three times, most used first — excluding Home and pinned folders.
+    func frequentFolders(limit: Int = 6) -> [URL] {
+        let home = FileManager.default.homeDirectoryForCurrentUser.pathKey
+        return folderCounts
+            .filter { $0.value >= 3 && $0.key != home }
+            .sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+            .map { URL(fileURLWithPath: $0.key, isDirectory: true) }
+            .filter { !Preferences.shared.isPinned($0) && FileManager.default.fileExists(atPath: $0.path) }
+            .prefix(limit)
+            .map { $0 }
+    }
+
+    func recentFiles(limit: Int = 15) -> [URL] {
+        files.map { URL(fileURLWithPath: $0) }.filter { FileManager.default.fileExists(atPath: $0.path) }.prefix(limit).map { $0 }
+    }
+
+    /// "Clear File Explorer history".
+    func clear() {
+        folderCounts = [:]
+        files = []
+        UserDefaults.standard.removeObject(forKey: foldersKey)
+        UserDefaults.standard.removeObject(forKey: filesKey)
+        NotificationCenter.default.post(name: .arborRecentsChanged, object: self)
     }
 }

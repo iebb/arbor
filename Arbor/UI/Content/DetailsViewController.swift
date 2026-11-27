@@ -11,6 +11,9 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     private var renameCancelled = false
     /// A reload that arrived mid-rename; applied when editing ends so the edit isn't destroyed.
     private var deferredShow: (items: [FileItem], context: PresentationContext)?
+    private var hoveredRow = -1
+    private let pointToSelect = PointToSelect()
+    private var nameColumnIndex: Int? { tableView.tableColumns.firstIndex { $0.identifier == Column.name.identifier } }
 
     enum Column: String, CaseIterable {
         case name, folder, dateModified, type, size, dateCreated
@@ -44,7 +47,7 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
 
     override func loadView() {
         tableView.style = .fullWidth
-        tableView.rowHeight = 24
+        tableView.rowHeight = 26
         tableView.intercellSpacing = NSSize(width: 8, height: 0)
         tableView.allowsMultipleSelection = true
         tableView.allowsEmptySelection = true
@@ -91,6 +94,12 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
             guard let self, self.items.indices.contains(row) else { return }
             self.beginRename(self.items[row].url)
         }
+        tableView.isSingleClickMode = { [weak self] in self?.context.display.singleClickToOpen ?? false }
+        tableView.onSingleClickOpen = { [weak self] row in
+            guard let self, self.items.indices.contains(row) else { return }
+            self.delegate?.presenter(self, open: [self.items[row]])
+        }
+        tableView.onHover = { [weak self] row in self?.hoverChanged(row) }
 
         let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
         scroll.documentView = tableView
@@ -124,6 +133,7 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
         items = newItems
         context = newContext
         tableView.tableColumn(withIdentifier: Column.folder.identifier)?.isHidden = !newContext.isSearch
+        applyRowHeight()
         suppressSortCallback = true
         tableView.sortDescriptors = [NSSortDescriptor(key: newContext.sort.key.rawValue, ascending: newContext.sort.ascending)]
         suppressSortCallback = false
@@ -133,9 +143,15 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
         if scrollToTop { tableView.scrollRowToVisible(0) }
     }
 
+    private func applyRowHeight() {
+        let height: CGFloat = context.display.compact ? 22 : 26
+        if tableView.rowHeight != height { tableView.rowHeight = height }
+    }
+
     func updateDecorations(_ newContext: PresentationContext) {
         context = newContext
         guard !items.isEmpty, renamingURL == nil else { return }
+        applyRowHeight()
         tableView.reloadData(forRowIndexes: IndexSet(items.indices), columnIndexes: IndexSet(tableView.tableColumns.indices))
     }
 
@@ -178,6 +194,8 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
               let field = cell.textField else { return }
         renamingURL = items[row].url
         renameCancelled = false
+        pointToSelect.cancel()
+        field.attributedStringValue = itemTitle(text(for: .name, item: items[row]), underline: false, font: .systemFont(ofSize: 13))
         cell.setEditing(true)
         view.window?.makeFirstResponder(field)
         selectBaseName(in: field, item: items[row], displayed: field.stringValue)
@@ -217,6 +235,7 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     // MARK: Actions
 
     @objc private func doubleClicked() {
+        guard !context.display.singleClickToOpen else { return }  // the first click already opened it
         let row = tableView.clickedRow
         guard items.indices.contains(row) else { return }
         delegate?.presenter(self, open: selectedItems.isEmpty ? [items[row]] : selectedItems)
@@ -281,11 +300,23 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
         let dimmed = context.isDimmed(item)
         if column == .name {
             let cell = tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? NameCellView ?? NameCellView(identifier: tableColumn.identifier)
-            cell.textField?.stringValue = text(for: .name, item: item)
             cell.textField?.delegate = self
             cell.imageView?.image = IconCache.icon(for: item.url)
             cell.alphaValue = dimmed ? 0.5 : 1
-            cell.toolTip = item.isFolder ? nil : "Type: \(item.kind)\nSize: \(item.size.map(Format.bytes) ?? "—")\nDate modified: \(Format.date(item.modified))"
+            let display = context.display
+            cell.toolTipSource.provider = display.popUpDescriptions ? { display.toolTip(for: item) } : nil
+            cell.toolTipSource.install(on: cell)
+            cell.onToggle = { [weak self, weak cell] in
+                guard let self, let cell else { return }
+                let row = self.tableView.row(for: cell)
+                guard row >= 0 else { return }
+                if self.tableView.isRowSelected(row) {
+                    self.tableView.deselectRow(row)
+                } else {
+                    self.tableView.selectRowIndexes([row], byExtendingSelection: true)
+                }
+            }
+            decorate(cell, row: row)
             return cell
         }
         let cell = tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? TextCellView ?? TextCellView(identifier: tableColumn.identifier)
@@ -301,7 +332,50 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
+        refreshVisibleDecorations()
         delegate?.presenterSelectionDidChange(self)
+    }
+
+    // MARK: Hover, underline and check boxes
+
+    /// Sets the name's underline and the check box for one row (skipped while that row is being renamed).
+    private func decorate(_ cell: NameCellView, row: Int) {
+        guard items.indices.contains(row) else { return }
+        let item = items[row]
+        if let renamingURL, item.url.isSameItem(as: renamingURL) { return }
+        let selected = tableView.isRowSelected(row)
+        let hovered = row == hoveredRow
+        let display = context.display
+        cell.textField?.attributedStringValue = itemTitle(text(for: .name, item: item), underline: display.underlines(hovered: hovered), font: .systemFont(ofSize: 13))
+        cell.setCheckBox(reserved: display.checkBoxes, visible: display.showsCheckBox(selected: selected, hovered: hovered), checked: selected)
+    }
+
+    private func decorate(row: Int) {
+        guard row >= 0, let column = nameColumnIndex,
+              let cell = tableView.view(atColumn: column, row: row, makeIfNecessary: false) as? NameCellView else { return }
+        decorate(cell, row: row)
+    }
+
+    private func refreshVisibleDecorations() {
+        let range = tableView.rows(in: tableView.visibleRect)
+        guard range.length > 0 else { return }
+        for row in range.location..<(range.location + range.length) { decorate(row: row) }
+    }
+
+    private func hoverChanged(_ row: Int) {
+        guard row != hoveredRow else { return }
+        let old = hoveredRow
+        hoveredRow = row
+        decorate(row: old)
+        decorate(row: row)
+        guard context.display.singleClickToOpen, row >= 0, renamingURL == nil else { return pointToSelect.cancel() }
+        pointToSelect.schedule { [weak self] in
+            guard let self, self.hoveredRow == row, self.renamingURL == nil, self.items.indices.contains(row) else { return }
+            let extend = NSEvent.modifierFlags.contains(.command)
+            if extend || self.tableView.selectedRowIndexes != IndexSet(integer: row) {
+                self.tableView.selectRowIndexes([row], byExtendingSelection: extend)
+            }
+        }
     }
 
     func tableView(_ tableView: NSTableView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
@@ -350,7 +424,29 @@ final class HeaderMenuStateUpdater: NSObject, NSMenuDelegate {
 final class ExplorerTableView: NSTableView {
     var menuProvider: ((Int) -> NSMenu?)?
     var onSlowClick: ((Int) -> Void)?
+    var onSingleClickOpen: ((Int) -> Void)?
+    var onHover: ((Int) -> Void)?
+    var isSingleClickMode: () -> Bool = { false }
     private var slowClickRow = -1
+    private var hoverArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        onHover?(row(at: convert(event.locationInWindow, from: nil)))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        onHover?(-1)
+    }
 
     override func menu(for event: NSEvent) -> NSMenu? {
         let row = row(at: convert(event.locationInWindow, from: nil))
@@ -370,10 +466,18 @@ final class ExplorerTableView: NSTableView {
         let column = column(at: point)
         let onName = column >= 0 && tableColumns[column].identifier.rawValue == DetailsViewController.Column.name.rawValue
         let plainClick = event.modifierFlags.intersection([.command, .shift, .option, .control]).isEmpty
-        let eligible = event.clickCount == 1 && plainClick && onName && row >= 0
+        let singleClickMode = isSingleClickMode()
+        let startLocation = NSEvent.mouseLocation
+        let eligible = !singleClickMode && event.clickCount == 1 && plainClick && onName && row >= 0
             && selectedRowIndexes == IndexSet(integer: row) && window?.firstResponder === self
         let started = Date()
         super.mouseDown(with: event)
+        if singleClickMode, plainClick, event.clickCount == 1, row >= 0 {
+            // Open on click, but not when the click turned into a drag.
+            let end = NSEvent.mouseLocation
+            if hypot(end.x - startLocation.x, end.y - startLocation.y) < 4 { onSingleClickOpen?(row) }
+            return
+        }
         if eligible, selectedRowIndexes == IndexSet(integer: row), Date().timeIntervalSince(started) < 0.5 {
             slowClickRow = row
             perform(#selector(fireSlowClick), with: nil, afterDelay: NSEvent.doubleClickInterval + 0.05)
@@ -392,9 +496,20 @@ final class ExplorerTableView: NSTableView {
 }
 
 final class NameCellView: NSTableCellView {
+    let toolTipSource = LazyToolTip()
+    let checkBox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    var onToggle: (() -> Void)?
+    private var iconAtLeading: NSLayoutConstraint!
+    private var iconAfterCheckBox: NSLayoutConstraint!
+
     init(identifier: NSUserInterfaceItemIdentifier) {
         super.init(frame: .zero)
         self.identifier = identifier
+        checkBox.translatesAutoresizingMaskIntoConstraints = false
+        checkBox.target = self
+        checkBox.action = #selector(toggled)
+        checkBox.isHidden = true
+        addSubview(checkBox)
         let icon = NSImageView()
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.translatesAutoresizingMaskIntoConstraints = false
@@ -407,8 +522,13 @@ final class NameCellView: NSTableCellView {
         addSubview(field)
         imageView = icon
         textField = field
+        iconAtLeading = icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2)
+        iconAfterCheckBox = icon.leadingAnchor.constraint(equalTo: checkBox.trailingAnchor, constant: 4)
         NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            iconAtLeading,
+            checkBox.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            checkBox.centerYAnchor.constraint(equalTo: centerYAnchor),
+            checkBox.widthAnchor.constraint(equalToConstant: 16),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
             icon.widthAnchor.constraint(equalToConstant: 18),
             icon.heightAnchor.constraint(equalToConstant: 18),
@@ -419,6 +539,23 @@ final class NameCellView: NSTableCellView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// `reserved` keeps room for the box on every row so icons don't jump; `visible` shows it.
+    func setCheckBox(reserved: Bool, visible: Bool, checked: Bool) {
+        if iconAfterCheckBox.isActive != reserved {
+            iconAtLeading.isActive = !reserved
+            iconAfterCheckBox.isActive = reserved
+        }
+        checkBox.isHidden = !(reserved && visible)
+        checkBox.state = checked ? .on : .off
+    }
+
+    @objc private func toggled() { onToggle?() }
+
+    override func layout() {
+        super.layout()
+        toolTipSource.install(on: self)
+    }
 
     func setEditing(_ editing: Bool) {
         guard let field = textField else { return }

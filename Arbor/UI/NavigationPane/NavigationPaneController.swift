@@ -9,7 +9,7 @@ protocol NavigationPaneDelegate: AnyObject {
 
 /// One row of the navigation tree. Children load lazily the first time a row is expanded.
 final class TreeNode {
-    enum Kind { case home, iCloud, pinned, thisMac, volume, folder, separator }
+    enum Kind { case home, iCloud, pinned, frequent, thisMac, volume, folder, separator }
 
     let kind: Kind
     let url: URL?
@@ -57,6 +57,14 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
     private var revealGeneration = 0
     private var observers: [NSObjectProtocol] = []
     private var lastRevealed: Location?
+    private var rootsSignature = ""
+
+    /// What the top level depends on; when it changes the roots are rebuilt.
+    private var currentRootsSignature: String {
+        let prefs = Preferences.shared
+        let frequent = prefs[.showFrequentFolders] ? RecentItems.shared.frequentFolders().map(\.pathKey) : []
+        return "\(prefs[.showThisMac])|\(prefs[.compactView])|\(frequent.joined(separator: ":"))"
+    }
 
     var hasFocus: Bool { view.window?.firstResponder === outlineView }
 
@@ -109,7 +117,12 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
             self?.refresh(folders: folders)
         })
         observers.append(center.addObserver(forName: .arborPreferencesChanged, object: nil, queue: .main) { [weak self] _ in
-            self?.refreshAllLoaded()
+            guard let self else { return }
+            if self.currentRootsSignature != self.rootsSignature { self.buildRoots() } else { self.refreshAllLoaded() }
+        })
+        observers.append(center.addObserver(forName: .arborRecentsChanged, object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.currentRootsSignature != self.rootsSignature else { return }
+            self.buildRoots()
         })
         observers.append(center.addObserver(forName: .arborVolumesChanged, object: nil, queue: .main) { [weak self] _ in
             guard let self, let thisMac = self.roots.first(where: { $0.kind == .thisMac }) else { return }
@@ -144,12 +157,23 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
         for pin in Preferences.shared.pinnedFolders where fm.fileExists(atPath: pin.path) {
             nodes.append(TreeNode(kind: .pinned, url: pin, title: Location.displayName(of: pin)))
         }
-        nodes.append(TreeNode(kind: .separator, url: nil, title: ""))
-        let thisMac = TreeNode(kind: .thisMac, url: nil, title: "This Mac")
-        nodes.append(thisMac)
+        // "Show frequently used folders": unpinned folders you visit often, under the pins.
+        if Preferences.shared[.showFrequentFolders] {
+            for folder in RecentItems.shared.frequentFolders() {
+                nodes.append(TreeNode(kind: .frequent, url: folder.normalizedFolder, title: Location.displayName(of: folder)))
+            }
+        }
+        var thisMac: TreeNode?
+        if Preferences.shared[.showThisMac] {
+            nodes.append(TreeNode(kind: .separator, url: nil, title: ""))
+            let node = TreeNode(kind: .thisMac, url: nil, title: "This Mac")
+            nodes.append(node)
+            thisMac = node
+        }
         roots = nodes
+        rootsSignature = currentRootsSignature
         outlineView.reloadData()
-        outlineView.expandItem(thisMac)
+        if let thisMac { outlineView.expandItem(thisMac) }
         if let lastRevealed { reveal(lastRevealed) }
     }
 
@@ -176,7 +200,7 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
         case .separator:
             completion([])
         case .thisMac:
-            let volumes = VolumeService.mountedVolumes().map { TreeNode(kind: .volume, url: $0.url, title: $0.name, parent: node) }
+            let volumes = VolumeService.visibleVolumes().map { TreeNode(kind: .volume, url: $0.url, title: $0.name, parent: node) }
             DispatchQueue.main.async { completion(volumes) }
         default:
             guard let url = node.url else { return completion([]) }
@@ -240,7 +264,7 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
         revealGeneration += 1
         let generation = revealGeneration
         guard let target = location.scopeURL else {
-            if let thisMac = roots.first(where: { $0.kind == .thisMac }) { select(thisMac) }
+            if let thisMac = roots.first(where: { $0.kind == .thisMac }) { select(thisMac) } else { selectNothing() }
             return
         }
         if let direct = roots.first(where: { $0.url?.isSameItem(as: target) == true }) {
@@ -254,6 +278,8 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
         // Prefer showing the folder under Home or iCloud Drive; otherwise under This Mac › drive.
         if let anchor = roots.first(where: { ($0.kind == .home || $0.kind == .iCloud) && $0.url.map(target.isDescendant(of:)) == true }), let anchorURL = anchor.url {
             expand(anchor, chain: ArraySlice(target.folderChain(below: anchorURL)), generation: generation)
+        } else if roots.first(where: { $0.kind == .thisMac }) == nil {
+            selectNothing()
         } else if let thisMac = roots.first(where: { $0.kind == .thisMac }) {
             ensureChildren(of: thisMac) { [weak self] in
                 guard let self, generation == self.revealGeneration else { return }
@@ -334,7 +360,7 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
     }
 
     func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
-        (item as? TreeNode)?.kind == .separator ? 9 : 24
+        (item as? TreeNode)?.kind == .separator ? 9 : (Preferences.shared[.compactView] ? 20 : 24)
     }
 
     func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
@@ -350,7 +376,7 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
     // MARK: Drag and drop
 
     func outlineView(_ outlineView: NSOutlineView, pasteboardWriterForItem item: Any) -> NSPasteboardWriting? {
-        guard let node = item as? TreeNode, node.kind == .folder || node.kind == .pinned, let url = node.url else { return nil }
+        guard let node = item as? TreeNode, [.folder, .pinned, .frequent].contains(node.kind), let url = node.url else { return nil }
         return url as NSURL
     }
 

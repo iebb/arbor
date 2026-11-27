@@ -1,15 +1,19 @@
 import AppKit
+import UniformTypeIdentifiers
 
 /// Reads folder contents off the main thread.
 enum DirectoryLoader {
     static func load(_ url: URL, showHidden: Bool) async throws -> [FileItem] {
-        try await Task.detached(priority: .userInitiated) {
+        let hideProtected = Preferences.shared[.hideProtectedSystemFiles]
+        return try await Task.detached(priority: .userInitiated) {
             let urls = try FileManager().contentsOfDirectory(
                 at: url,
                 includingPropertiesForKeys: FileItem.resourceKeys,
                 options: showHidden ? [] : [.skipsHiddenFiles]
             )
-            return urls.compactMap { FileItem(url: $0) }
+            return urls
+                .filter { !(showHidden && hideProtected && ProtectedFiles.isProtected($0)) }
+                .compactMap { FileItem(url: $0) }
         }.value
     }
 
@@ -19,6 +23,29 @@ enum DirectoryLoader {
         return items
             .filter(\.isFolder)
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+}
+
+/// "Hide protected operating system files": macOS bookkeeping files and the Unix folders at the top
+/// of the startup disk stay hidden even when hidden items are shown.
+enum ProtectedFiles {
+    static let names: Set<String> = [
+        ".DS_Store", ".localized", "Icon\r", ".fseventsd", ".Spotlight-V100", ".Trashes", ".TemporaryItems",
+        ".DocumentRevisions-V100", ".VolumeIcon.icns", ".apdisk", ".com.apple.timemachine.donotpresent",
+        ".PKInstallSandboxManager-SystemSoftware", ".vol", ".file", ".nofollow", ".resolve", ".hotfiles.btree",
+    ]
+    static let rootNames: Set<String> = ["bin", "sbin", "usr", "private", "cores", "dev", "etc", "tmp", "var"]
+
+    static func isProtected(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        if names.contains(name) || name.hasPrefix("._") { return true }
+        return url.deletingLastPathComponent().pathKey == "/" && rootNames.contains(name)
+    }
+
+    /// Folders skipped when "Include system directories" is off.
+    static var systemDirectories: [String] {
+        ["/System", "/Library", "/private", "/usr", "/bin", "/sbin", "/cores", "/dev",
+         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library").pathKey]
     }
 }
 
@@ -72,7 +99,7 @@ final class CancellationFlag: @unchecked Sendable {
 /// Matches file names the way Explorer's search box does: substring, or wildcards (`*.txt`, `IMG_???.jpg`).
 struct NameMatcher {
     let query: String
-    private let usesWildcards: Bool
+    let usesWildcards: Bool
 
     init(_ query: String) {
         self.query = query.trimmingCharacters(in: .whitespaces)
@@ -88,20 +115,45 @@ struct NameMatcher {
     }
 }
 
-/// Recursive name search below a folder, streaming results in batches.
+/// What Explorer's Search tab controls.
+struct SearchOptions {
+    var showHidden: Bool
+    var hideProtected: Bool
+    var includeSystemDirectories: Bool
+    var includeCompressedFiles: Bool
+    var searchContents: Bool
+
+    static var current: SearchOptions {
+        let prefs = Preferences.shared
+        return SearchOptions(
+            showHidden: prefs.showHidden,
+            hideProtected: prefs[.hideProtectedSystemFiles],
+            includeSystemDirectories: prefs[.searchSystemDirectories],
+            includeCompressedFiles: prefs[.searchCompressedFiles],
+            searchContents: prefs[.searchFileContents]
+        )
+    }
+}
+
+/// Recursive search below a folder, streaming results in batches. Matches names, and optionally
+/// the names of files inside ZIP archives and the text inside files.
 enum SearchService {
-    static func search(root: URL, query: String, showHidden: Bool) -> AsyncStream<[FileItem]> {
+    static let maxContentSize = 16 * 1024 * 1024
+
+    static func search(root: URL, query: String, options: SearchOptions) -> AsyncStream<[FileItem]> {
         AsyncStream { continuation in
             let flag = CancellationFlag()
             continuation.onTermination = { _ in flag.cancel() }
             DispatchQueue.global(qos: .userInitiated).async {
                 let matcher = NameMatcher(query)
-                var options: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
-                if !showHidden { options.insert(.skipsHiddenFiles) }
+                var enumerationOptions: FileManager.DirectoryEnumerationOptions = [.skipsPackageDescendants]
+                if !options.showHidden { enumerationOptions.insert(.skipsHiddenFiles) }
+                let skipped = options.includeSystemDirectories ? [] : ProtectedFiles.systemDirectories.filter { $0 != root.pathKey }
+                let keys = FileItem.resourceKeys + [.fileSizeKey]
                 guard let enumerator = FileManager().enumerator(
                     at: root,
-                    includingPropertiesForKeys: FileItem.resourceKeys,
-                    options: options,
+                    includingPropertiesForKeys: keys,
+                    options: enumerationOptions,
                     errorHandler: { _, _ in true }
                 ) else {
                     continuation.finish()
@@ -111,7 +163,15 @@ enum SearchService {
                 var lastFlush = Date()
                 while let url = enumerator.nextObject() as? URL {
                     if flag.isCancelled { break }
-                    if matcher.matches(url.lastPathComponent), let item = FileItem(url: url) {
+                    if !skipped.isEmpty, skipped.contains(url.pathKey) {
+                        enumerator.skipDescendants()
+                        continue
+                    }
+                    if options.showHidden, options.hideProtected, ProtectedFiles.isProtected(url) {
+                        enumerator.skipDescendants()
+                        continue
+                    }
+                    if matches(url, matcher: matcher, options: options), let item = FileItem(url: url) {
                         batch.append(item)
                     }
                     if !batch.isEmpty, batch.count >= 250 || Date().timeIntervalSince(lastFlush) > 0.3 {
@@ -124,6 +184,46 @@ enum SearchService {
                 continuation.finish()
             }
         }
+    }
+
+    private static func matches(_ url: URL, matcher: NameMatcher, options: SearchOptions) -> Bool {
+        if matcher.matches(url.lastPathComponent) { return true }
+        let ext = url.pathExtension.lowercased()
+        if options.includeCompressedFiles, ext == "zip" {
+            return zipEntryNames(url).contains { matcher.matches(($0 as NSString).lastPathComponent) }
+        }
+        if options.searchContents, !matcher.usesWildcards, isSearchableText(url) {
+            return fileContains(url, text: matcher.query)
+        }
+        return false
+    }
+
+    static func isSearchableText(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey, .contentTypeKey]),
+              values.isRegularFile == true, (values.fileSize ?? 0) <= maxContentSize else { return false }
+        guard let type = values.contentType else { return false }
+        return type.conforms(to: .text) || type.conforms(to: .sourceCode) || type.conforms(to: .json) || type.conforms(to: .xml)
+    }
+
+    static func fileContains(_ url: URL, text: String) -> Bool {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return false }
+        let content = String(decoding: data, as: UTF8.self)
+        return content.range(of: text, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    }
+
+    /// Entry names in a ZIP archive, read with the system's `zipinfo`.
+    static func zipEntryNames(_ url: URL) -> [String] {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/zipinfo")
+        process.arguments = ["-1", url.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        guard (try? process.run()) != nil else { return [] }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return [] }
+        return String(decoding: data, as: UTF8.self).split(separator: "\n").map(String.init)
     }
 }
 
@@ -169,6 +269,17 @@ enum VolumeService {
         return volumes.sorted { a, b in
             if a.isRoot != b.isRoot { return a.isRoot }
             return a.name.localizedStandardCompare(b.name) == .orderedAscending
+        }
+    }
+
+    /// Drives shown on This Mac and in the tree. "Hide empty drives" hides removable drives with nothing on them.
+    static func visibleVolumes() -> [VolumeInfo] {
+        let volumes = mountedVolumes()
+        guard Preferences.shared[.hideEmptyDrives] else { return volumes }
+        return volumes.filter { volume in
+            guard volume.isEjectable else { return true }
+            let entries = (try? FileManager.default.contentsOfDirectory(at: volume.url, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+            return !entries.isEmpty
         }
     }
 

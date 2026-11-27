@@ -109,6 +109,10 @@ extension BrowserViewController: NSMenuItemValidation {
         case #selector(toggleHiddenItems(_:)):
             menuItem.state = Preferences.shared.showHidden ? .on : .off
             return true
+        case #selector(toggleOption(_:)):
+            guard let raw = menuItem.representedObject as? String, let option = FolderOption(rawValue: raw) else { return false }
+            menuItem.state = Preferences.shared[option] ? .on : .off
+            return true
         case #selector(togglePin(_:)):
             let urls = targetURLs(menuItem)
             menuItem.title = !urls.isEmpty && urls.allSatisfy(Preferences.shared.isPinned) ? "Unpin from Quick access" : "Pin to Quick access"
@@ -123,8 +127,14 @@ extension BrowserViewController: NSMenuItemValidation {
     func open(_ items: [FileItem], inNewTab: Bool = false) {
         let folders = items.compactMap(\.folderURL)
         let files = items.filter { !$0.isFolder }.map(\.url)
-        for file in files { NSWorkspace.shared.open(file) }
-        if inNewTab || folders.count > 1 {
+        for file in files {
+            NSWorkspace.shared.open(file)
+            if Preferences.shared[.showRecentFiles] { RecentItems.shared.recordFileOpen(file) }
+        }
+        if !inNewTab, Preferences.shared[.openFoldersInNewWindow] {
+            // "Open each folder in its own window".
+            for folder in folders { AppDelegate.shared.openWindow(.folder(folder)) }
+        } else if inNewTab || folders.count > 1 {
             for folder in folders { AppDelegate.shared.openTab(.folder(folder), from: view.window) }
         } else if let folder = folders.first {
             navigate(to: .folder(folder))
@@ -430,6 +440,12 @@ extension BrowserViewController: NSMenuItemValidation {
 
     @objc func toggleHiddenItems(_ sender: Any?) {
         Preferences.shared.showHidden.toggle()
+    }
+
+    /// View › Show items that flip one setting (`representedObject` is the option's raw value).
+    @objc func toggleOption(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String, let option = FolderOption(rawValue: raw) else { return }
+        Preferences.shared.toggle(option)
     }
 
     // MARK: Quick Look

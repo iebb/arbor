@@ -51,6 +51,8 @@ final class BrowserViewController: NSViewController {
     }()
     private(set) var presenter: ItemPresenter?
     private let watcher = DirectoryWatcher()
+    private let statusSeparator = NSBox()
+    private var statusBarHeight: NSLayoutConstraint!
     private var observers: [NSObjectProtocol] = []
     private var didApplyInitialSplit = false
 
@@ -101,7 +103,7 @@ final class BrowserViewController: NSViewController {
 
         let separator = NSBox()
         separator.boxType = .separator
-        let topSeparator = NSBox()
+        let topSeparator = statusSeparator
         topSeparator.boxType = .separator
         let splitView = splitController.view
         for subview in [addressBar, commandBar, separator, splitView, topSeparator, statusBar] {
@@ -135,8 +137,9 @@ final class BrowserViewController: NSViewController {
             statusBar.leadingAnchor.constraint(equalTo: root.leadingAnchor),
             statusBar.trailingAnchor.constraint(equalTo: root.trailingAnchor),
             statusBar.bottomAnchor.constraint(equalTo: root.bottomAnchor),
-            statusBar.heightAnchor.constraint(equalToConstant: 26),
         ])
+        statusBarHeight = statusBar.heightAnchor.constraint(equalToConstant: 26)
+        statusBarHeight.isActive = true
         view = root
     }
 
@@ -146,6 +149,7 @@ final class BrowserViewController: NSViewController {
         commandBar.delegate = self
         navigationPane.delegate = self
         statusBar.onViewModeSelected = { [weak self] mode in self?.setViewMode(mode) }
+        applyStatusBarVisibility()
         watcher.onChange = { [weak self] in self?.reload() }
 
         let center = NotificationCenter.default
@@ -284,6 +288,7 @@ final class BrowserViewController: NSViewController {
             pendingSelection = []
         case .folder(let url):
             watcher.watch(url)
+            if Preferences.shared[.showFrequentFolders] { RecentItems.shared.recordFolderVisit(url) }
             installPresenter()
             presenter?.show(items: [], context: presentationContext(), scrollToTop: true)
             reload(scrollToTop: true)
@@ -307,8 +312,19 @@ final class BrowserViewController: NSViewController {
     }
 
     private func updateWindowTitle() {
-        view.window?.title = location.title
+        // "Display the full path in the title bar" (the tab keeps the short name, as in Explorer).
+        var title = location.title
+        if Preferences.shared[.fullPathInTitleBar], case .folder(let url) = location { title = url.pathKey }
+        view.window?.title = title
         view.window?.tab.title = location.title
+    }
+
+    /// "Show status bar".
+    private func applyStatusBarVisibility() {
+        let visible = Preferences.shared[.showStatusBar]
+        statusBar.isHidden = !visible
+        statusSeparator.isHidden = !visible
+        statusBarHeight.constant = visible ? 26 : 0
     }
 
     /// Swaps between the Details table and the icon grid as the view mode requires.
@@ -336,7 +352,8 @@ final class BrowserViewController: NSViewController {
             cutPaths: FileClipboard.shared.cutPaths,
             isSearch: location.isSearch,
             viewMode: viewSettings.viewMode,
-            sort: viewSettings.sort
+            sort: viewSettings.sort,
+            display: .current
         )
     }
 
@@ -407,7 +424,7 @@ final class BrowserViewController: NSViewController {
         rawItems = []
         isBusy = true
         applyItems(scrollToTop: true)
-        let stream = SearchService.search(root: root, query: query, showHidden: Preferences.shared.showHidden)
+        let stream = SearchService.search(root: root, query: query, options: .current)
         searchTask = Task { [weak self] in
             for await batch in stream {
                 guard let self, generation == self.loadGeneration, !Task.isCancelled else { return }
@@ -535,6 +552,9 @@ final class BrowserViewController: NSViewController {
 
     private func preferencesChanged() {
         IconCache.invalidate()
+        applyStatusBarVisibility()
+        updateChrome()
+        if !previewSplitItem.isCollapsed { previewPane.show(selectedContentItems) }
         reload()
     }
 
