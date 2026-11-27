@@ -21,7 +21,7 @@ final class DetailsPaneController: NSViewController {
     private weak var liveContainsLabel: NSTextField?
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 500))
+        let root = WindowBackgroundView(frame: NSRect(x: 0, y: 0, width: 280, height: 500))
 
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -159,7 +159,13 @@ final class DetailsPaneController: NSViewController {
         if let created = item.created {
             addRow(String(localized: "Date created"), value: Format.longDate(created))
         }
-        addRow(String(localized: "Location"), value: item.url.parentFolder.path)
+        let locationPath: String
+        #if DEBUG
+        locationPath = DemoRedactor.redactPath(item.url.parentFolder.path)
+        #else
+        locationPath = item.url.parentFolder.path
+        #endif
+        addRow(String(localized: "Location"), value: locationPath)
     }
 
     private func showMultiple(_ items: [FileItem]) {
@@ -233,16 +239,23 @@ final class DetailsPaneController: NSViewController {
     }
 
     private func setPreviewImage(for item: FileItem) {
+        imageView.wantsLayer = true
+        imageView.layer?.cornerRadius = 0
+        imageView.layer?.masksToBounds = false
         imageView.image = IconCache.icon(for: item.url)
         guard !Preferences.shared[.alwaysShowIcons], ThumbnailProvider.wantsThumbnail(item) else { return }
         let url = item.url
         if let cached = ThumbnailProvider.shared.cachedThumbnail(for: url, size: 128) {
             imageView.image = cached
+            imageView.layer?.cornerRadius = 8
+            imageView.layer?.masksToBounds = true
         } else {
             let scale = view.window?.backingScaleFactor ?? 2
             ThumbnailProvider.shared.requestThumbnail(for: url, size: 128, scale: scale) { [weak self] image in
                 guard let self, self.shownKey.hasPrefix(url.pathKey + "|") else { return }
                 self.imageView.image = image
+                self.imageView.layer?.cornerRadius = 8
+                self.imageView.layer?.masksToBounds = true
             }
         }
     }

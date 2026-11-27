@@ -4,11 +4,13 @@ import AppKit
 final class PropertiesWindowController: NSWindowController, NSWindowDelegate {
     private static var open: [PropertiesWindowController] = []
 
-    static func show(for urls: [URL]) {
+    @discardableResult
+    static func show(for urls: [URL]) -> PropertiesWindowController {
         let controller = PropertiesWindowController(urls: urls)
         open.append(controller)
         controller.showWindow(nil)
         controller.window?.makeKeyAndOrderFront(nil)
+        return controller
     }
 
     private let urls: [URL]
@@ -88,7 +90,13 @@ final class PropertiesWindowController: NSWindowController, NSWindowDelegate {
             row(String(localized: "Type"), files > 0 && folders > 0 ? String(localized: "Multiple types") : (folders > 0 ? String(localized: "All of type File folder") : String(localized: "Multiple files")))
         }
         let parents = Set(urls.map { $0.parentFolder.path })
-        row(String(localized: "Location"), parents.count == 1 ? parents.first! : String(localized: "Various folders"))
+        let rawLocation = parents.count == 1 ? parents.first! : String(localized: "Various folders")
+        #if DEBUG
+        let shownLocation = parents.count == 1 ? DemoRedactor.redactPath(rawLocation) : rawLocation
+        #else
+        let shownLocation = rawLocation
+        #endif
+        row(String(localized: "Location"), shownLocation)
         rows.append([NSView(), NSView()])
         row(String(localized: "Size"), sizeLabel)
         row(String(localized: "Size on disk"), diskSizeLabel)
@@ -139,7 +147,7 @@ final class PropertiesWindowController: NSWindowController, NSWindowDelegate {
         separator.widthAnchor.constraint(equalTo: stack.widthAnchor, constant: -40).isActive = true
         buttons.trailingAnchor.constraint(equalTo: stack.trailingAnchor, constant: -20).isActive = true
 
-        let content = NSView()
+        let content = WindowBackgroundView()
         content.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),

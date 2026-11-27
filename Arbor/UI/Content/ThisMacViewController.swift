@@ -251,9 +251,15 @@ final class TileView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         guard isSelected || isHovered else { return }
-        let alpha: CGFloat = isSelected ? 0.22 : 0.08
-        NSColor.controlAccentColor.withAlphaComponent(alpha).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 6, yRadius: 6).fill()
+        let color = isSelected ? NSColor.controlAccentColor.withAlphaComponent(0.20) : NSColor.labelColor.withAlphaComponent(0.05)
+        color.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
+        if isSelected {
+            NSColor.controlAccentColor.withAlphaComponent(0.5).setStroke()
+            let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 7, yRadius: 7)
+            border.lineWidth = 1
+            border.stroke()
+        }
     }
 }
 
@@ -270,12 +276,19 @@ final class CapacityBar: NSView {
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func draw(_ dirtyRect: NSRect) {
+        let track = NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3)
         NSColor.quaternaryLabelColor.setFill()
-        bounds.fill()
-        let fill = NSRect(x: 0, y: 0, width: bounds.width * fraction, height: bounds.height)
+        track.fill()
+        let fillWidth = max(fraction > 0 ? 4 : 0, bounds.width * fraction)
+        let fillRect = NSRect(x: 0, y: 0, width: min(bounds.width, fillWidth), height: bounds.height)
+        NSGraphicsContext.saveGraphicsState()
+        track.addClip()
         (fraction > 0.9 ? NSColor.systemRed : NSColor.controlAccentColor).setFill()
-        fill.fill()
-        NSColor.separatorColor.setStroke()
-        NSBezierPath(rect: bounds.insetBy(dx: 0.5, dy: 0.5)).stroke()
+        NSBezierPath(roundedRect: fillRect, xRadius: 3, yRadius: 3).fill()
+        NSGraphicsContext.restoreGraphicsState()
+        NSColor.separatorColor.withAlphaComponent(0.45).setStroke()
+        let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 3, yRadius: 3)
+        border.lineWidth = 0.75
+        border.stroke()
     }
 }

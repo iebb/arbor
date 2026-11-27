@@ -30,6 +30,18 @@ extension BrowserViewController {
         guard !editingText else { return false }
 
         switch (code, flags) {
+        case (KeyCode.x, [.command]):
+            guard canPerform(#selector(cut(_:))) else { return false }
+            cut(nil)
+        case (KeyCode.c, [.command]):
+            guard canPerform(#selector(copy(_:))) else { return false }
+            copy(nil)
+        case (KeyCode.v, [.command]):
+            guard canPerform(#selector(paste(_:))) else { return false }
+            paste(nil)
+        case (KeyCode.escape, []):
+            guard FileClipboard.shared.isCut else { return false }
+            FileClipboard.shared.cancelCut()
         case (KeyCode.f2, []):
             renameSelection(nil)
         case (KeyCode.d, [.option]), (KeyCode.f4, [.option]):

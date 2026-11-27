@@ -5,10 +5,35 @@
 **A native macOS file manager that works like Windows File Explorer.**
 
 Arbor gives people coming from Windows the Explorer they know: a folder tree on the left, a
-breadcrumb address bar you can type into, real Cut & Paste, Enter to open, F2 to rename, Backspace
+breadcrumb address bar you can type into, real Cut & Paste (`⌘X` / `⌘V`), Enter to open, F2 to rename, Backspace
 to go back, and the familiar command bar, Details columns and status bar. It is written in Swift and
 AppKit, so it still feels at home on the Mac — native tabs, Quick Look, the Trash, drag and drop with
 Finder, and dark mode.
+
+![Arbor Details view with Details pane](docs/screenshots/details-en.png)
+
+| Large Icons & Details Pane (Dark Mode) | Folder Options (Settings) |
+| :---: | :---: |
+| ![Arbor Dark Mode Photos](docs/screenshots/photos-dark-en.png) | ![Arbor Folder Options](docs/screenshots/settings-en.png) |
+
+| Collapsible Groups | Properties & This Mac |
+| :---: | :---: |
+| ![Arbor Collapsible Groups](docs/screenshots/grouped-en.png) | ![Arbor Properties](docs/screenshots/properties-en.png) |
+
+![Arbor This Mac view](docs/screenshots/thismac-en.png)
+
+<details>
+<summary>中文界面截图 / Simplified Chinese Screenshots</summary>
+
+| 详细信息与详细信息窗格 | 深色模式大图标 |
+| :---: | :---: |
+| ![Arbor 中文详细信息](docs/screenshots/details-zh.png) | ![Arbor 中文深色模式](docs/screenshots/photos-dark-zh.png) |
+
+| 文件夹选项 | 属性与分组 |
+| :---: | :---: |
+| ![Arbor 文件夹选项](docs/screenshots/settings-zh.png) | ![Arbor 属性](docs/screenshots/properties-zh.png) |
+
+</details>
 
 ## Features
 
@@ -62,7 +87,7 @@ locations on This Mac and can reconnect when Arbor starts.
 **Open from anywhere** — an optional system-wide shortcut (⌥⌘E and others) that opens a new Arbor
 window from any app, like Win+E, plus Open at login.
 
-**Languages** — English and Japanese (日本語), using Windows Explorer's Japanese terms.
+**Languages** — English, Simplified Chinese (简体中文), and Japanese (日本語), using Windows 11 Explorer's native terminology.
 
 **Folder Options** (⌘, or ⋯ › Options) — a copy of Explorer's dialog, with OK / Cancel / Apply and
 Restore Defaults on each tab:

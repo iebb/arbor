@@ -37,6 +37,18 @@ enum Breadcrumbs {
         let volumes = VolumeService.mountedVolumes()
         let volumeURL = VolumeService.volume(containing: url, in: volumes)?.url ?? URL(fileURLWithPath: "/", isDirectory: true)
         result.append(BreadcrumbSegment(title: Location.displayName(of: volumeURL), location: .folder(volumeURL)))
+        #if DEBUG
+        if DemoRedactor.enabled, let demoRoot = DemoRedactor.demoRoot,
+           url.isSameItem(as: demoRoot) || url.isDescendant(of: demoRoot) {
+            result.append(BreadcrumbSegment(title: "Users", location: .folder(volumeURL)))
+            result.append(BreadcrumbSegment(title: "Alex", location: .home))
+            result.append(BreadcrumbSegment(title: demoRoot.lastPathComponent, location: .folder(demoRoot)))
+            for folder in url.folderChain(below: demoRoot) {
+                result.append(BreadcrumbSegment(title: Location.displayName(of: folder), location: .folder(folder)))
+            }
+            return result
+        }
+        #endif
         for folder in url.folderChain(below: volumeURL) {
             result.append(BreadcrumbSegment(title: Location.displayName(of: folder), location: .folder(folder)))
         }
@@ -112,7 +124,8 @@ final class AddressBarView: NSView, NSTextFieldDelegate, NSSearchFieldDelegate {
         searchField.target = self
         searchField.action = #selector(searchChanged)
         searchField.delegate = self
-        searchField.controlSize = .large
+        searchField.controlSize = .regular
+        searchField.font = .systemFont(ofSize: 12.5)
 
         [backButton, forwardButton, upButton, refreshButton, addressBox, searchField].forEach(addSubview)
 
@@ -273,16 +286,18 @@ final class AddressBoxView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
-        layer?.cornerRadius = 6
+        layer?.cornerRadius = 7
         layer?.borderWidth = 1
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
     override func updateLayer() {
-        layer?.backgroundColor = NSColor.controlBackgroundColor.cgColor
-        layer?.borderColor = (isEditing ? NSColor.controlAccentColor : NSColor.separatorColor).cgColor
-        layer?.borderWidth = isEditing ? 2 : 1
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+            layer?.borderColor = (isEditing ? NSColor.controlAccentColor : NSColor.separatorColor.withAlphaComponent(0.4)).cgColor
+            layer?.borderWidth = isEditing ? 1.5 : 1
+        }
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -329,7 +344,8 @@ final class BreadcrumbView: NSView {
             let button = NSButton(title: segment.title, target: self, action: #selector(segmentClicked(_:)))
             button.bezelStyle = .recessed
             button.showsBorderOnlyWhileMouseInside = true
-            button.font = .systemFont(ofSize: 13)
+            let isLast = index == newSegments.count - 1
+            button.font = .systemFont(ofSize: 12.5, weight: isLast ? .medium : .regular)
             button.tag = index
             button.lineBreakMode = .byTruncatingMiddle
             addSubview(button)

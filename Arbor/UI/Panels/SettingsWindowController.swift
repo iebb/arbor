@@ -42,6 +42,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
     }
 
+    func selectTab(at index: Int) {
+        guard index >= 0, index < tabView.numberOfTabViewItems else { return }
+        tabView.selectTabViewItem(at: index)
+    }
+
     private func loadDraft() {
         draft = Dictionary(uniqueKeysWithValues: FolderOption.allCases.map { ($0, Preferences.shared[$0]) })
         draftStart = Preferences.shared.startLocation
@@ -97,7 +102,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         buttons.spacing = 8
         buttons.translatesAutoresizingMaskIntoConstraints = false
 
-        let content = NSView()
+        let content = WindowBackgroundView()
         content.addSubview(tabView)
         content.addSubview(buttons)
         NSLayoutConstraint.activate([

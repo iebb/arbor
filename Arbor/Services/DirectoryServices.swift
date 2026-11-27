@@ -383,14 +383,20 @@ enum VolumeService {
             guard let values = try? url.resourceValues(forKeys: Set(keys)), values.volumeIsBrowsable ?? true else { return nil }
             let important = values.volumeAvailableCapacityForImportantUsage
             let available = important.map { $0 } ?? Int64(values.volumeAvailableCapacity ?? 0)
+            let isRoot = values.volumeIsRootFileSystem ?? (url.pathKey == "/")
+            let isNetwork = !(values.volumeIsLocal ?? true)
+            var displayName = values.volumeLocalizedName ?? url.lastPathComponent
+            #if DEBUG
+            if DemoRedactor.enabled, !isRoot, !isNetwork { displayName = "External SSD" }
+            #endif
             return VolumeInfo(
                 url: url.normalizedFolder,
-                name: values.volumeLocalizedName ?? url.lastPathComponent,
+                name: displayName,
                 totalCapacity: Int64(values.volumeTotalCapacity ?? 0),
                 availableCapacity: available,
-                isRoot: values.volumeIsRootFileSystem ?? (url.pathKey == "/"),
+                isRoot: isRoot,
                 isEjectable: (values.volumeIsEjectable ?? false) || (values.volumeIsRemovable ?? false),
-                isNetwork: !(values.volumeIsLocal ?? true)
+                isNetwork: isNetwork
             )
         }
         return volumes.sorted { a, b in

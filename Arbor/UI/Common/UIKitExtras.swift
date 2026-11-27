@@ -26,6 +26,21 @@ extension NSTextField {
     }
 }
 
+/// A view that paints the active appearance's window background (keeps Light/Dark mode crisp).
+final class WindowBackgroundView: NSView {
+    override var wantsUpdateLayer: Bool { true }
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func updateLayer() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        }
+    }
+}
+
 /// A label that lets clicks fall through to whatever is underneath.
 final class PassthroughLabel: NSTextField {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
@@ -78,6 +93,9 @@ enum KeyCode {
     static let f4: UInt16 = 118
     static let f5: UInt16 = 96
     static let d: UInt16 = 2
+    static let x: UInt16 = 7
+    static let c: UInt16 = 8
+    static let v: UInt16 = 9
     static let n: UInt16 = 45
     static let p: UInt16 = 35
     /// Number row 1…8.

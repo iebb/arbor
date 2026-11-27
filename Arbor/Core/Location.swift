@@ -54,11 +54,49 @@ enum Location: Hashable {
     }
 
     static func displayName(of url: URL) -> String {
-        FileManager.default.displayName(atPath: url.path)
+        #if DEBUG
+        if let redacted = DemoRedactor.displayName(of: url) { return redacted }
+        #endif
+        return FileManager.default.displayName(atPath: url.path)
     }
 
     static var home: Location { .folder(FileManager.default.realHomeDirectory.normalizedFolder) }
 }
+
+#if DEBUG
+/// Redacts personal usernames, external drive names, and demo paths during automated screenshot capture.
+enum DemoRedactor {
+    static var enabled = false
+    static var demoRoot: URL?
+
+    static func displayName(of url: URL) -> String? {
+        guard enabled else { return nil }
+        if url.isSameItem(as: FileManager.default.realHomeDirectory) { return "Alex" }
+        if url.pathKey.hasPrefix("/Volumes/"), url.isVolumeRoot { return "External SSD" }
+        return nil
+    }
+
+    static func redactPath(_ path: String) -> String {
+        guard enabled else { return path }
+        var result = path
+        if let demoRoot {
+            let rootKey = demoRoot.pathKey
+            if result == rootKey || result.hasPrefix(rootKey + "/") {
+                result = "/Users/alex/Workspace" + result.dropFirst(rootKey.count)
+            }
+            let privateKey = "/private" + rootKey
+            if result == privateKey || result.hasPrefix(privateKey + "/") {
+                result = "/Users/alex/Workspace" + result.dropFirst(privateKey.count)
+            }
+        }
+        let user = NSUserName()
+        if !user.isEmpty {
+            result = result.replacingOccurrences(of: "/Users/\(user)", with: "/Users/alex")
+        }
+        return result
+    }
+}
+#endif
 
 extension URL {
     /// A canonical path string for comparing file URLs (no trailing slash, `.`/`..` resolved).

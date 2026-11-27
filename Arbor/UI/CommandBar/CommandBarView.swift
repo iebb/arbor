@@ -32,21 +32,22 @@ protocol CommandBarDelegate: AnyObject {
 final class CommandBarView: NSView {
     weak var delegate: CommandBarDelegate?
 
-    private lazy var newButton = HoverButton(symbol: "plus.circle", title: String(localized: "New"), toolTip: String(localized: "Create a new item"), target: self, action: #selector(newPressed(_:)))
+    private lazy var newButton = HoverButton(symbol: "plus.circle.fill", title: String(localized: "New") + " ▾", toolTip: String(localized: "Create a new item"), target: self, action: #selector(newPressed(_:)))
     private lazy var cutButton = HoverButton(symbol: "scissors", toolTip: String(localized: "Cut (⌘X)"), target: self, action: #selector(cutPressed))
     private lazy var copyButton = HoverButton(symbol: "doc.on.doc", toolTip: String(localized: "Copy (⌘C)"), target: self, action: #selector(copyPressed))
     private lazy var pasteButton = HoverButton(symbol: "doc.on.clipboard", toolTip: String(localized: "Paste (⌘V)"), target: self, action: #selector(pastePressed))
     private lazy var renameButton = HoverButton(symbol: "character.cursor.ibeam", toolTip: String(localized: "Rename (F2)"), target: self, action: #selector(renamePressed))
     private lazy var shareButton = HoverButton(symbol: "square.and.arrow.up", toolTip: String(localized: "Share"), target: self, action: #selector(sharePressed(_:)))
     private lazy var deleteButton = HoverButton(symbol: "trash", toolTip: String(localized: "Delete (Del or ⌘⌫)"), target: self, action: #selector(deletePressed))
-    private lazy var sortButton = HoverButton(symbol: "arrow.up.arrow.down", title: String(localized: "Sort"), toolTip: String(localized: "Sort items"), target: self, action: #selector(sortPressed(_:)))
-    private lazy var viewButton = HoverButton(symbol: "square.grid.2x2", title: String(localized: "View"), toolTip: String(localized: "Change the layout"), target: self, action: #selector(viewPressed(_:)))
+    private lazy var sortButton = HoverButton(symbol: "arrow.up.arrow.down", title: String(localized: "Sort") + " ▾", toolTip: String(localized: "Sort items"), target: self, action: #selector(sortPressed(_:)))
+    private lazy var viewButton = HoverButton(symbol: "square.grid.2x2", title: String(localized: "View") + " ▾", toolTip: String(localized: "Change the layout"), target: self, action: #selector(viewPressed(_:)))
     private lazy var moreButton = HoverButton(symbol: "ellipsis", toolTip: String(localized: "See more"), target: self, action: #selector(morePressed(_:)))
     private lazy var previewButton = HoverButton(symbol: "sidebar.right", title: String(localized: "Preview"), toolTip: String(localized: "Preview pane (⌥P)"), target: self, action: #selector(previewPressed))
     private lazy var detailsButton = HoverButton(symbol: "info.circle", title: String(localized: "Details"), toolTip: String(localized: "Details pane (⌥⇧P)"), target: self, action: #selector(detailsPressed))
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        newButton.contentTintColor = .controlAccentColor
         let left = NSStackView(views: [
             newButton, separator(),
             cutButton, copyButton, pasteButton, renameButton, shareButton, deleteButton, separator(),

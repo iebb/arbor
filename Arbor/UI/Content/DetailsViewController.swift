@@ -65,11 +65,11 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
 
         var width: CGFloat {
             switch self {
-            case .name: return 300
-            case .folder: return 280
-            case .dateModified, .dateCreated: return 150
-            case .type: return 160
-            case .size: return 90
+            case .name: return 240
+            case .folder: return 260
+            case .dateModified, .dateCreated: return 145
+            case .type: return 140
+            case .size: return 85
             }
         }
 
@@ -414,7 +414,7 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { item(row) != nil }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        item(row) == nil ? 30 : tableView.rowHeight
+        item(row) == nil ? 32 : tableView.rowHeight
     }
 
     private func text(for column: Column, item: FileItem) -> String {
@@ -568,6 +568,7 @@ final class ExplorerTableView: NSTableView {
     var onHover: ((Int) -> Void)?
     var isSingleClickMode: () -> Bool = { false }
     private var slowClickRow = -1
+    private var hoveredRow = -1
     private var hoverArea: NSTrackingArea?
 
     override func updateTrackingAreas() {
@@ -580,12 +581,32 @@ final class ExplorerTableView: NSTableView {
 
     override func mouseMoved(with event: NSEvent) {
         super.mouseMoved(with: event)
-        onHover?(row(at: convert(event.locationInWindow, from: nil)))
+        let next = row(at: convert(event.locationInWindow, from: nil))
+        if next != hoveredRow {
+            let previous = hoveredRow
+            hoveredRow = next
+            if previous >= 0 { setNeedsDisplay(rect(ofRow: previous)) }
+            if next >= 0 { setNeedsDisplay(rect(ofRow: next)) }
+        }
+        onHover?(next)
     }
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
+        if hoveredRow >= 0 {
+            let previous = hoveredRow
+            hoveredRow = -1
+            setNeedsDisplay(rect(ofRow: previous))
+        }
         onHover?(-1)
+    }
+
+    override func drawRow(_ row: Int, clipRect: NSRect) {
+        if row == hoveredRow, !isRowSelected(row) {
+            NSColor.labelColor.withAlphaComponent(0.045).setFill()
+            NSBezierPath(roundedRect: rect(ofRow: row).insetBy(dx: 4, dy: 1), xRadius: 5, yRadius: 5).fill()
+        }
+        super.drawRow(row, clipRect: clipRect)
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {

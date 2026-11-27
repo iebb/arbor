@@ -80,7 +80,7 @@ final class BrowserViewController: NSViewController {
     // MARK: Layout
 
     override func loadView() {
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: 1180, height: 720))
+        let root = WindowBackgroundView(frame: NSRect(x: 0, y: 0, width: 1180, height: 720))
 
         addChild(splitController)
         let split = splitController.splitView

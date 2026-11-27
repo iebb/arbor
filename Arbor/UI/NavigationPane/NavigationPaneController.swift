@@ -280,6 +280,12 @@ final class NavigationPaneController: NSViewController, NSOutlineViewDataSource,
             selectNothing()
             return
         }
+        #if DEBUG
+        if DemoRedactor.enabled {
+            selectNothing()
+            return
+        }
+        #endif
         // Prefer showing the folder under Home or iCloud Drive; otherwise under This Mac › drive.
         if let anchor = roots.first(where: { ($0.kind == .home || $0.kind == .iCloud) && $0.url.map(target.isDescendant(of:)) == true }), let anchorURL = anchor.url {
             expand(anchor, chain: ArraySlice(target.folderChain(below: anchorURL)), generation: generation)

@@ -437,3 +437,24 @@ final class NetworkLocationTests: XCTestCase {
         XCTAssertEqual(NetworkLocation(address: "smb://nas", reconnectAtLaunch: false).displayName, "nas")
     }
 }
+
+final class FileClipboardTests: XCTestCase {
+    func testCutCopyCancelAndClear() {
+        let clipboard = FileClipboard.shared
+        let sample = URL(fileURLWithPath: "/tmp/arbor-clipboard-test.txt")
+        clipboard.write([sample], cut: true)
+        XCTAssertTrue(clipboard.isCut)
+        XCTAssertTrue(clipboard.hasFiles)
+        XCTAssertEqual(clipboard.cutPaths, [sample.pathKey])
+
+        clipboard.cancelCut()
+        XCTAssertFalse(clipboard.isCut)
+        XCTAssertTrue(clipboard.cutPaths.isEmpty)
+
+        clipboard.write([sample], cut: true)
+        XCTAssertTrue(clipboard.isCut)
+        clipboard.clearAfterMove()
+        XCTAssertFalse(clipboard.isCut)
+        XCTAssertFalse(clipboard.hasFiles)
+    }
+}

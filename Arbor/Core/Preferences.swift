@@ -309,6 +309,9 @@ final class RecentItems {
 
     /// Folders visited at least three times, most used first — excluding Home and pinned folders.
     func frequentFolders(limit: Int = 6) -> [URL] {
+        #if DEBUG
+        if DemoRedactor.enabled { return [] }
+        #endif
         let home = FileManager.default.realHomeDirectory.pathKey
         return folderCounts
             .filter { $0.value >= 3 && $0.key != home }

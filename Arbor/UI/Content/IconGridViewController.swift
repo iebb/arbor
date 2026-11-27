@@ -451,6 +451,7 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
             view.secondDetailField.stringValue = file.isFolder ? "" : Format.bytes(file.size ?? 0)
         }
         view.alphaValue = context.isDimmed(file) ? 0.5 : 1
+        view.hasThumbnail = false
         view.imageView.image = IconCache.icon(for: file.url)
         view.badgeView.image = nil
         view.toolTipSource.provider = display.popUpDescriptions ? { display.toolTip(for: file) } : nil
@@ -472,12 +473,14 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         guard metrics.iconSize >= 48, !display.alwaysShowIcons, ThumbnailProvider.wantsThumbnail(file) else { return }
         let badge = display.fileIconOnThumbnails ? NSWorkspace.shared.urlForApplication(toOpen: file.url).map { NSWorkspace.shared.icon(forFile: $0.path) } : nil
         if let thumbnail = ThumbnailProvider.shared.cachedThumbnail(for: file.url, size: metrics.iconSize) {
+            view.hasThumbnail = true
             view.imageView.image = thumbnail
             view.badgeView.image = badge
         } else {
             let scale = self.view.window?.backingScaleFactor ?? 2
             ThumbnailProvider.shared.requestThumbnail(for: file.url, size: metrics.iconSize, scale: scale) { [weak view] image in
                 guard let view, view.representedURL?.isSameItem(as: file.url) == true else { return }
+                view.hasThumbnail = true
                 view.imageView.image = image
                 view.badgeView.image = badge
             }
@@ -648,7 +651,8 @@ final class IconItemView: NSView {
     var representedURL: URL?
     var isSelected = false { didSet { needsDisplay = true; updateDecorations() } }
     var isHighlighted = false { didSet { needsDisplay = true } }
-    var isHovered = false { didSet { if oldValue != isHovered { updateDecorations() } } }
+    var isHovered = false { didSet { if oldValue != isHovered { needsDisplay = true; updateDecorations() } } }
+    var hasThumbnail = false { didSet { applyThumbnailFrame() } }
     var display = DisplayOptions() { didSet { updateDecorations(); if oldValue.checkBoxes != display.checkBoxes { needsLayout = true } } }
     var title = "" { didSet { updateDecorations() } }
     var onToggle: (() -> Void)?
@@ -768,14 +772,27 @@ final class IconItemView: NSView {
         }
     }
 
+    private func applyThumbnailFrame() {
+        imageView.wantsLayer = true
+        imageView.layer?.cornerRadius = hasThumbnail ? 6 : 0
+        imageView.layer?.masksToBounds = hasThumbnail
+    }
+
     override func draw(_ dirtyRect: NSRect) {
-        guard isSelected || isHighlighted else { return }
-        let color = isSelected ? NSColor.controlAccentColor.withAlphaComponent(0.25) : NSColor.controlAccentColor.withAlphaComponent(0.12)
-        color.setFill()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 5, yRadius: 5).fill()
+        guard isSelected || isHighlighted || isHovered else { return }
+        let color: NSColor
         if isSelected {
-            NSColor.controlAccentColor.withAlphaComponent(0.6).setStroke()
-            let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 5, yRadius: 5)
+            color = NSColor.controlAccentColor.withAlphaComponent(0.22)
+        } else if isHighlighted {
+            color = NSColor.controlAccentColor.withAlphaComponent(0.12)
+        } else {
+            color = NSColor.labelColor.withAlphaComponent(0.05)
+        }
+        color.setFill()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 1, dy: 1), xRadius: 6, yRadius: 6).fill()
+        if isSelected {
+            NSColor.controlAccentColor.withAlphaComponent(0.55).setStroke()
+            let border = NSBezierPath(roundedRect: bounds.insetBy(dx: 1.5, dy: 1.5), xRadius: 6, yRadius: 6)
             border.lineWidth = 1
             border.stroke()
         }

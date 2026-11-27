@@ -47,6 +47,13 @@ final class FileClipboard {
         postChange()
     }
 
+    /// Cancels a pending Cut (Escape in Explorer) so cut items return to normal opacity.
+    func cancelCut() {
+        guard isCut else { return }
+        cutChangeCount = nil
+        postChange()
+    }
+
     func copyText(_ text: String) {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
