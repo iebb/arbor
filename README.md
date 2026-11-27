@@ -87,7 +87,7 @@ locations on This Mac and can reconnect when Arbor starts.
 **Open from anywhere** — an optional system-wide shortcut (⌥⌘E and others) that opens a new Arbor
 window from any app, like Win+E, plus Open at login.
 
-**Languages** — English, Simplified Chinese (简体中文), and Japanese (日本語), using Windows 11 Explorer's native terminology.
+**Languages** — English, Simplified Chinese (简体中文), Traditional Chinese (繁體中文), Japanese (日本語), Korean (한국어), Spanish (Español), French (Français), German (Deutsch), Brazilian Portuguese (Português), Italian (Italiano), and Russian (Русский), using Windows 11 Explorer's native terminology.
 
 **Folder Options** (⌘, or ⋯ › Options) — a copy of Explorer's dialog, with OK / Cancel / Apply and
 Restore Defaults on each tab:
