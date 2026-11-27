@@ -452,7 +452,14 @@ final class IconGridViewController: NSViewController, ItemPresenter, NSCollectio
         }
         view.alphaValue = context.isDimmed(file) ? 0.5 : 1
         view.hasThumbnail = false
-        view.imageView.image = IconCache.icon(for: file.url)
+        view.imageView.image = IconCache.fastIcon(for: file)
+        if IconCache.cachedIcon(for: file.url) == nil {
+            let targetURL = file.url
+            IconCache.loadIcon(for: targetURL) { [weak view] image in
+                guard let view, !view.hasThumbnail, view.representedURL?.isSameItem(as: targetURL) == true else { return }
+                view.imageView.image = image
+            }
+        }
         view.badgeView.image = nil
         view.toolTipSource.provider = display.popUpDescriptions ? { display.toolTip(for: file) } : nil
         view.toolTipSource.install(on: view)

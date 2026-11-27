@@ -304,7 +304,9 @@ final class BrowserViewController: NSViewController {
             if let selected = pendingSelection.first { thisMacController.select(selected) }
             pendingSelection = []
         case .folder(let url):
-            watcher.watch(url)
+            // Start watching only after DirectoryLoader.load succeeds so TCC-protected folders
+            // (Desktop, Documents, Downloads) prompt cleanly on the background load thread.
+            watcher.watch(nil)
             if Preferences.shared[.showFrequentFolders] { RecentItems.shared.recordFolderVisit(url) }
             installPresenter()
             presenter?.show(items: [], context: presentationContext(), scrollToTop: true)
@@ -404,6 +406,7 @@ final class BrowserViewController: NSViewController {
                 self.isBusy = false
                 switch result {
                 case .success(let loaded):
+                    self.watcher.watch(url)
                     self.rawItems = loaded
                     self.contentHost.setMessage(nil)
                     self.applyItems(scrollToTop: scrollToTop)
@@ -428,7 +431,9 @@ final class BrowserViewController: NSViewController {
         rawItems = []
         applyItems()
         let nsError = error as NSError
-        if nsError.domain == NSCocoaErrorDomain, nsError.code == NSFileReadNoPermissionError {
+        let isNoPermission = (nsError.domain == NSCocoaErrorDomain && nsError.code == NSFileReadNoPermissionError)
+            || (nsError.domain == NSPOSIXErrorDomain && (nsError.code == Int(EPERM) || nsError.code == Int(EACCES)))
+        if isNoPermission {
             if Edition.isAppStore {
                 contentHost.setMessage(String(localized: "Arbor doesn't have access to this folder yet.\n\nChoose Arbor › Grant Disk Access… and select your startup disk."))
             } else {

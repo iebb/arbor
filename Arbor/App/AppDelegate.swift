@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let workspace = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.didMountNotification, NSWorkspace.didUnmountNotification, NSWorkspace.didRenameVolumeNotification] {
             workspace.addObserver(forName: name, object: nil, queue: .main) { _ in
+                VolumeService.invalidateCache()
                 NotificationCenter.default.post(name: .arborVolumesChanged, object: nil)
             }
         }

@@ -440,7 +440,15 @@ final class DetailsViewController: NSViewController, ItemPresenter, NSTableViewD
         if column == .name {
             let cell = tableView.makeView(withIdentifier: tableColumn.identifier, owner: self) as? NameCellView ?? NameCellView(identifier: tableColumn.identifier)
             cell.textField?.delegate = self
-            cell.imageView?.image = IconCache.icon(for: item.url)
+            cell.representedURL = item.url
+            cell.imageView?.image = IconCache.fastIcon(for: item)
+            if IconCache.cachedIcon(for: item.url) == nil {
+                let targetURL = item.url
+                IconCache.loadIcon(for: targetURL) { [weak cell] image in
+                    guard let cell, cell.representedURL?.isSameItem(as: targetURL) == true else { return }
+                    cell.imageView?.image = image
+                }
+            }
             cell.alphaValue = dimmed ? 0.5 : 1
             let display = context.display
             cell.toolTipSource.provider = display.popUpDescriptions ? { display.toolTip(for: item) } : nil
@@ -675,6 +683,7 @@ final class ExplorerTableView: NSTableView {
 final class NameCellView: NSTableCellView {
     let toolTipSource = LazyToolTip()
     let checkBox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    var representedURL: URL?
     var onToggle: (() -> Void)?
     private var iconAtLeading: NSLayoutConstraint!
     private var iconAfterCheckBox: NSLayoutConstraint!

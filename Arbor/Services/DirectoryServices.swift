@@ -51,28 +51,42 @@ enum ProtectedFiles {
 }
 
 /// Watches one folder for entries being added, removed or renamed.
+/// Opens the directory descriptor off the main thread so TCC prompts or slow mounts never stall the UI.
 final class DirectoryWatcher {
     var onChange: (() -> Void)?
     private var source: DispatchSourceFileSystemObject?
     private var pending: DispatchWorkItem?
+    private var generation = 0
 
     func watch(_ url: URL?) {
         stop()
         guard let url else { return }
-        let descriptor = open(url.path, O_EVTONLY)
-        guard descriptor >= 0 else { return }
-        let source = DispatchSource.makeFileSystemObjectSource(
-            fileDescriptor: descriptor,
-            eventMask: [.write, .delete, .rename, .link, .extend, .attrib],
-            queue: .main
-        )
-        source.setEventHandler { [weak self] in self?.scheduleChange() }
-        source.setCancelHandler { close(descriptor) }
-        self.source = source
-        source.resume()
+        generation += 1
+        let expected = generation
+        let path = url.path
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let descriptor = open(path, O_EVTONLY)
+            guard descriptor >= 0 else { return }
+            DispatchQueue.main.async {
+                guard let self, self.generation == expected else {
+                    close(descriptor)
+                    return
+                }
+                let source = DispatchSource.makeFileSystemObjectSource(
+                    fileDescriptor: descriptor,
+                    eventMask: [.write, .delete, .rename, .link, .extend, .attrib],
+                    queue: .main
+                )
+                source.setEventHandler { [weak self] in self?.scheduleChange() }
+                source.setCancelHandler { close(descriptor) }
+                self.source = source
+                source.resume()
+            }
+        }
     }
 
     func stop() {
+        generation += 1
         pending?.cancel()
         pending = nil
         source?.cancel()
@@ -370,14 +384,21 @@ struct VolumeInfo: Hashable {
 }
 
 /// Mounted drives — the "Devices and drives" section of This Mac.
+/// Cached briefly and invalidated whenever volumes mount/unmount so breadcrumb updates never stall the main thread.
 enum VolumeService {
     private static let keys: [URLResourceKey] = [
         .volumeLocalizedNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityKey,
         .volumeAvailableCapacityForImportantUsageKey, .volumeIsBrowsableKey, .volumeIsRootFileSystemKey,
         .volumeIsEjectableKey, .volumeIsRemovableKey, .volumeIsLocalKey,
     ]
+    private static var cached: (volumes: [VolumeInfo], at: Date)?
 
-    static func mountedVolumes() -> [VolumeInfo] {
+    static func invalidateCache() { cached = nil }
+
+    static func mountedVolumes(forceRefresh: Bool = false) -> [VolumeInfo] {
+        if !forceRefresh, let cached, Date().timeIntervalSince(cached.at) < 10 {
+            return cached.volumes
+        }
         guard let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: keys, options: [.skipHiddenVolumes]) else { return [] }
         let volumes: [VolumeInfo] = urls.compactMap { url in
             guard let values = try? url.resourceValues(forKeys: Set(keys)), values.volumeIsBrowsable ?? true else { return nil }
@@ -399,15 +420,17 @@ enum VolumeService {
                 isNetwork: isNetwork
             )
         }
-        return volumes.sorted { a, b in
+        let sorted = volumes.sorted { a, b in
             if a.isRoot != b.isRoot { return a.isRoot }
             return a.name.localizedStandardCompare(b.name) == .orderedAscending
         }
+        cached = (sorted, Date())
+        return sorted
     }
 
     /// Drives shown on This Mac and in the tree. "Hide empty drives" hides removable drives with nothing on them.
     static func visibleVolumes() -> [VolumeInfo] {
-        let volumes = mountedVolumes()
+        let volumes = mountedVolumes(forceRefresh: true)
         guard Preferences.shared[.hideEmptyDrives] else { return volumes }
         return volumes.filter { volume in
             guard volume.isEjectable else { return true }
@@ -424,23 +447,60 @@ enum VolumeService {
 }
 
 /// File icons and Quick Look thumbnails, cached.
+/// `fastIcon(for:)` returns immediately without disk I/O; `loadIcon(for:completion:)` resolves the exact file icon asynchronously.
 enum IconCache {
     private static let cache = NSCache<NSString, NSImage>()
+    private static let typeCache = NSCache<NSString, NSImage>()
+    private static let queue = DispatchQueue(label: "io.github.iebb.arbor.icons", qos: .userInitiated)
 
     static func icon(for url: URL) -> NSImage {
         let key = url.pathKey as NSString
         if let cached = cache.object(forKey: key) { return cached }
-        let image: NSImage
-        if let docs = FileManager.default.userFolderURL(.documentDirectory),
-           url.isSameItem(as: docs),
-           let clean = NSImage(contentsOfFile: "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/DocumentsFolderIcon.icns") {
-            image = clean
-        } else {
-            image = NSWorkspace.shared.icon(forFile: url.path)
-        }
+        let image = resolveIcon(for: url)
         cache.setObject(image, forKey: key)
         return image
     }
 
-    static func invalidate() { cache.removeAllObjects() }
+    static func cachedIcon(for url: URL) -> NSImage? {
+        cache.object(forKey: url.pathKey as NSString)
+    }
+
+    /// Instant zero-disk-I/O placeholder icon based on the item's UTType (or cached exact icon if ready).
+    static func fastIcon(for item: FileItem) -> NSImage {
+        if let cached = cachedIcon(for: item.url) { return cached }
+        let type: UTType = item.isFolder ? .folder : (item.contentType ?? .data)
+        let typeKey = type.identifier as NSString
+        if let cached = typeCache.object(forKey: typeKey) { return cached }
+        let image = NSWorkspace.shared.icon(for: type)
+        typeCache.setObject(image, forKey: typeKey)
+        return image
+    }
+
+    /// Resolves the exact file icon off the main thread and delivers it on the main queue.
+    static func loadIcon(for url: URL, completion: @escaping (NSImage) -> Void) {
+        let key = url.pathKey as NSString
+        if let cached = cache.object(forKey: key) {
+            completion(cached)
+            return
+        }
+        queue.async {
+            let image = resolveIcon(for: url)
+            cache.setObject(image, forKey: key)
+            DispatchQueue.main.async { completion(image) }
+        }
+    }
+
+    private static func resolveIcon(for url: URL) -> NSImage {
+        if let docs = FileManager.default.userFolderURL(.documentDirectory),
+           url.isSameItem(as: docs),
+           let clean = NSImage(contentsOfFile: "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/DocumentsFolderIcon.icns") {
+            return clean
+        }
+        return NSWorkspace.shared.icon(forFile: url.path)
+    }
+
+    static func invalidate() {
+        cache.removeAllObjects()
+        typeCache.removeAllObjects()
+    }
 }
