@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build and run unit tests
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild test \
+            -project Arbor.xcodeproj \
+            -scheme Arbor \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData \
+            -resultBundlePath build/Tests.xcresult \
+            | tee build/test.log
+
+      - name: Build Release app
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Arbor.xcodeproj \
+            -scheme Arbor \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData \
+            | tee build/release.log
+          ditto -c -k --sequesterRsrc --keepParent build/DerivedData/Build/Products/Release/Arbor.app build/Arbor.zip
+
+      - name: Upload app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Arbor-${{ github.sha }}
+          path: build/Arbor.zip
+          retention-days: 14
+
+      - name: Upload logs and test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ github.sha }}
+          path: |
+            build/*.log
+            build/Tests.xcresult
+          retention-days: 7

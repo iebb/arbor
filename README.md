@@ -1,5 +1,7 @@
 # Arbor
 
+[![CI](https://github.com/iebb/arbor/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/iebb/arbor/actions/workflows/ci.yml)
+
 **A native macOS file manager that works like Windows File Explorer.**
 
 Arbor gives people coming from Windows the Explorer they know: a folder tree on the left, a
@@ -109,7 +111,12 @@ make test     # run the unit tests
 make app      # build a Release Arbor.app into build/
 ```
 
-Or `xcodegen generate` and open `Arbor.xcodeproj`. You can pass a folder to start in:
+Or `xcodegen generate` and open `Arbor.xcodeproj`.
+
+**CI.** Every push to `master` and every pull request builds Arbor, runs the unit tests and uploads
+the Release `Arbor.app` as a workflow artifact (`.github/workflows/ci.yml`). Pushing a tag such as
+`v0.2.0` runs `.github/workflows/release.yml`, which tests, builds that version and publishes it as a
+GitHub release. Release builds are ad-hoc signed, not notarized. You can pass a folder to start in:
 `build/DerivedData/Build/Products/Debug/Arbor.app/Contents/MacOS/Arbor ~/Downloads`.
 
 Arbor is not sandboxed (a file manager needs to reach the whole disk). macOS asks for access to

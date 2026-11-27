@@ -1,0 +1,66 @@
+name: Release
+
+# Push a tag like v0.2.0 to build Arbor.app and publish it as a GitHub release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to release (for example v0.2.0)
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          xcodebuild test -project Arbor.xcodeproj -scheme Arbor -destination 'platform=macOS' -derivedDataPath build/DerivedData
+
+      - name: Build Release app
+        run: |
+          set -o pipefail
+          VERSION="${TAG#v}"
+          xcodebuild build \
+            -project Arbor.xcodeproj \
+            -scheme Arbor \
+            -configuration Release \
+            -destination 'platform=macOS' \
+            -derivedDataPath build/DerivedData \
+            MARKETING_VERSION="$VERSION" \
+            CURRENT_PROJECT_VERSION="${{ github.run_number }}"
+          ditto -c -k --sequesterRsrc --keepParent build/DerivedData/Build/Products/Release/Arbor.app "build/Arbor-$VERSION.zip"
+          shasum -a 256 "build/Arbor-$VERSION.zip" | tee "build/Arbor-$VERSION.zip.sha256"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${TAG#v}"
+          cat > notes.md <<NOTES
+          Arbor $VERSION for macOS 14 or later (Apple silicon and Intel).
+
+          This build is ad-hoc signed and not notarized. After unzipping, right-click Arbor.app and
+          choose Open the first time, or run: xattr -dr com.apple.quarantine /Applications/Arbor.app
+          NOTES
+          gh release create "$TAG" "build/Arbor-$VERSION.zip" "build/Arbor-$VERSION.zip.sha256" \
+            --title "Arbor $VERSION" --notes-file notes.md --generate-notes --verify-tag
