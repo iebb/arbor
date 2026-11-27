@@ -97,6 +97,7 @@ targets:
         ENABLE_APP_SANDBOX: YES
         ENABLE_HARDENED_RUNTIME: YES
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) APPSTORE
+        PRODUCT_BUNDLE_IDENTIFIER: ad.neko.arbor
         # A distinct product name keeps this build apart from the download's Arbor.app (Xcode 26 picked
         # the wrong one as the test host when both were named Arbor). Users still see "Arbor".
         PRODUCT_NAME: ArborAppStore
