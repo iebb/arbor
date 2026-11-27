@@ -156,6 +156,10 @@ Design notes:
 
 ## Roadmap
 
-Ideas for later: merging folders on conflict (Explorer's folder merge), Spotlight-backed content
-search, a "Content" layout and grouping, item check boxes, a global hotkey like Win+E, network
-locations, and restoring tabs at launch.
+Ideas for later: merging folders on conflict (Explorer's folder merge), a "Content" layout and
+grouping, a global hotkey like Win+E, network locations, Spotlight-backed search, and signed,
+notarized releases with automatic updates.
+
+## License
+
+Arbor is released under the [MIT License](LICENSE).

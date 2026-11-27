@@ -27,7 +27,7 @@ targets:
         LSApplicationCategoryType: public.app-category.utilities
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
         NSPrincipalClass: NSApplication
-        NSHumanReadableCopyright: "Copyright © 2026 Arbor contributors."
+        NSHumanReadableCopyright: "Copyright © 2026 ieb. MIT License."
         NSDesktopFolderUsageDescription: Arbor shows the files in your Desktop folder.
         NSDocumentsFolderUsageDescription: Arbor shows the files in your Documents folder.
         NSDownloadsFolderUsageDescription: Arbor shows the files in your Downloads folder.
